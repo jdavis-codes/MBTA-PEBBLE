@@ -1,9 +1,10 @@
 var Clay = require('@rebble/clay');
-var clayConfig = require('./config');
-// Settings are sent manually so a save that collides with a data update is retried.
-var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
-
+var config = require('./config');
+var configPage = require('./config-page');
 var keys = require('message_keys');
+
+// Settings are sent manually so a save that collides with a data update is retried.
+var clay = new Clay(config.build(), configPage, { autoHandleEvents: false });
 
 var API_BASE = 'https://api-v3.mbta.com';
 // Optional: a free key from https://api-v3.mbta.com/ raises the rate limit.
@@ -13,12 +14,14 @@ var MAX_TIMES = 7;
 // Look back this far when querying schedules so delayed trains are still found.
 var LOOKBACK_MS = 20 * 60 * 1000;
 
-var CR_ROUTE = 'CR-Newburyport';
-var NORTH_STATION = 'place-north';
-var SALEM = 'place-ER-0168';
-var CENTRAL = 'place-cntsq';
+// Must match NUM_ROWS in src/c/watchface.c.
+var NUM_ROWS = config.ROWS.length;
+// Row display modes; must match RowMode in src/c/watchface.c.
+var MODE_CLOCK = 0;
+var MODE_MINUTES = 1;
 
 var s_fetching = false;
+var s_refetch = false;
 
 function pad2(n) {
   return (n < 10 ? '0' : '') + n;
@@ -102,14 +105,40 @@ function isCancelled(attrs) {
                    attrs.schedule_relationship === 'SKIPPED');
 }
 
+function savedSettings() {
+  try {
+    return JSON.parse(localStorage.getItem('clay-settings')) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+// The line, station and direction chosen for a row, falling back to the defaults.
+function rowConfig(row, saved) {
+  var defaults = config.ROWS[row];
+  function pick(key, fallback) {
+    var v = saved[key + '[' + row + ']'];
+    return v === undefined || v === null || v === '' ? fallback : String(v);
+  }
+  return {
+    route: pick('ROUTE', defaults.route.value),
+    stop: pick('STOP', defaults.stop.value),
+    direction: pick('DIR', defaults.direction.value)
+  };
+}
+
+function isCommuterRail(route) {
+  return route.indexOf('CR-') === 0;
+}
+
 // Commuter rail: scheduled departures, overridden by live predictions when available.
-function fetchCommuterRail(stop, directionId, callback) {
+function fetchCommuterRail(row, callback) {
   var nowMs = Date.now();
   var win = serviceWindow(nowMs);
   apiGet('/schedules', {
-    'filter[stop]': stop,
-    'filter[route]': CR_ROUTE,
-    'filter[direction_id]': directionId,
+    'filter[stop]': row.stop,
+    'filter[route]': row.route,
+    'filter[direction_id]': row.direction,
     'filter[date]': win.date,
     'filter[min_time]': win.minTime,
     'include': 'prediction',
@@ -121,7 +150,7 @@ function fetchCommuterRail(stop, directionId, callback) {
     if (err) return callback(err);
     var included = indexIncluded(json);
     var nowSec = Math.floor(nowMs / 1000);
-    var times = [];
+    var trains = [];
     json.data.forEach(function(sched) {
       var a = sched.attributes;
       var rel = sched.relationships && sched.relationships.prediction;
@@ -130,20 +159,21 @@ function fetchCommuterRail(stop, directionId, callback) {
       if (isCancelled(p)) return;
       var t = parseIso((p && (p.departure_time || p.arrival_time)) ||
                        a.departure_time || a.arrival_time);
-      if (t > nowSec) times.push(t);
+      if (t > nowSec) trains.push({ time: t, dest: ' ' });
     });
-    times.sort(function(x, y) { return x - y; });
-    callback(null, times.slice(0, MAX_TIMES));
+    trains.sort(function(x, y) { return x.time - y.time; });
+    callback(null, { mode: MODE_CLOCK, trains: trains.slice(0, MAX_TIMES) });
   });
 }
 
-// Red Line southbound at Central: live predictions, tagged with the
-// first letter of the destination (A = Ashmont, B = Braintree).
-function fetchCentral(callback) {
+// Subway and light rail: live predictions. When trains in this direction go to
+// different places (e.g. Ashmont vs Braintree), each is tagged with the first
+// letter of its destination.
+function fetchSubway(row, callback) {
   apiGet('/predictions', {
-    'filter[stop]': CENTRAL,
-    'filter[route]': 'Red',
-    'filter[direction_id]': 0,
+    'filter[stop]': row.stop,
+    'filter[route]': row.route,
+    'filter[direction_id]': row.direction,
     'include': 'trip',
     'sort': 'departure_time',
     'page[limit]': 15,
@@ -154,25 +184,38 @@ function fetchCentral(callback) {
     var included = indexIncluded(json);
     var nowSec = Math.floor(Date.now() / 1000);
     var trains = [];
+    var headsigns = {};
     json.data.forEach(function(pred) {
       var a = pred.attributes;
       if (isCancelled(a)) return;
-      var t = parseIso(a.departure_time || a.arrival_time);
+      // Arrival-only predictions are trains terminating here.
+      if (!a.departure_time) return;
+      var t = parseIso(a.departure_time);
       if (t <= nowSec) return;
       var tripRel = pred.relationships && pred.relationships.trip;
       var trip = tripRel && tripRel.data ? included['trip:' + tripRel.data.id] : null;
-      var headsign = trip && trip.attributes.headsign ? trip.attributes.headsign : '?';
-      trains.push({ time: t, dest: headsign.charAt(0).toUpperCase() });
+      var headsign = trip && trip.attributes.headsign ? trip.attributes.headsign : '';
+      headsigns[headsign] = true;
+      trains.push({ time: t, dest: headsign ? headsign.charAt(0).toUpperCase() : ' ' });
     });
     trains.sort(function(x, y) { return x.time - y.time; });
-    callback(null, trains.slice(0, MAX_TIMES));
+    trains = trains.slice(0, MAX_TIMES);
+    if (Object.keys(headsigns).length < 2) {
+      trains.forEach(function(t) { t.dest = ' '; });
+    }
+    callback(null, { mode: MODE_MINUTES, trains: trains });
   });
 }
 
-function putTimes(dict, baseKey, times) {
+function putRow(dict, row, result) {
+  var dest = '';
   for (var i = 0; i < MAX_TIMES; i++) {
-    dict[baseKey + i] = i < times.length ? times[i] : 0;
+    var train = result.trains[i];
+    dict[keys.TIMES + row * MAX_TIMES + i] = train ? train.time : 0;
+    dest += train ? train.dest : ' ';
   }
+  dict[keys.DEST + row] = dest;
+  dict[keys.MODE + row] = result.mode;
 }
 
 function sendToWatch(dict, retries, what) {
@@ -188,54 +231,60 @@ function sendToWatch(dict, retries, what) {
 }
 
 function refresh() {
-  if (s_fetching) return;
+  if (s_fetching) {
+    s_refetch = true;
+    return;
+  }
   s_fetching = true;
+  s_refetch = false;
 
+  var saved = savedSettings();
   var dict = {};
-  var pending = 3;
+  var pending = NUM_ROWS;
   function done() {
     if (--pending > 0) return;
     s_fetching = false;
-    // Stations that failed to load are omitted so the watch keeps its last data.
+    // Rows that failed to load are omitted so the watch keeps its last data.
     if (Object.keys(dict).length > 0) {
       sendToWatch(dict, 2);
     }
+    if (s_refetch) refresh();
   }
 
-  fetchCommuterRail(NORTH_STATION, 0, function(err, times) {
-    if (err) console.log('North Station fetch failed: ' + err.message);
-    else putTimes(dict, keys.N_TIMES, times);
-    done();
-  });
-
-  fetchCommuterRail(SALEM, 1, function(err, times) {
-    if (err) console.log('Salem fetch failed: ' + err.message);
-    else putTimes(dict, keys.S_TIMES, times);
-    done();
-  });
-
-  fetchCentral(function(err, trains) {
-    if (err) {
-      console.log('Central fetch failed: ' + err.message);
-    } else {
-      putTimes(dict, keys.C_TIMES, trains.map(function(t) { return t.time; }));
-      var dest = '';
-      for (var i = 0; i < MAX_TIMES; i++) {
-        dest += i < trains.length ? trains[i].dest : ' ';
-      }
-      dict[keys.C_DEST] = dest;
-    }
-    done();
-  });
+  for (var r = 0; r < NUM_ROWS; r++) {
+    (function(row) {
+      var cfg = rowConfig(row, saved);
+      var fetch = isCommuterRail(cfg.route) ? fetchCommuterRail : fetchSubway;
+      fetch(cfg, function(err, result) {
+        if (err) {
+          console.log('Row ' + (row + 1) + ' (' + cfg.route + ' ' + cfg.stop + ') fetch failed: ' +
+                      err.message);
+        } else {
+          putRow(dict, row, result);
+        }
+        done();
+      });
+    })(r);
+  }
 }
 
 Pebble.addEventListener('showConfiguration', function() {
+  // Rebuilt each time so the page includes the saved stations as fallback options.
+  clay = new Clay(config.build(savedSettings()), configPage, { autoHandleEvents: false });
   Pebble.openURL(clay.generateUrl());
 });
 
 Pebble.addEventListener('webviewclosed', function(e) {
   if (!e || !e.response) return;
-  sendToWatch(clay.getSettings(e.response), 3, 'settings');
+  var settings = clay.getSettings(e.response);
+  // The watch only needs the labels; the phone uses the stations to fetch.
+  for (var row = 0; row < NUM_ROWS; row++) {
+    delete settings[keys.ROUTE + row];
+    delete settings[keys.STOP + row];
+    delete settings[keys.DIR + row];
+  }
+  sendToWatch(settings, 3, 'settings');
+  refresh();
 });
 
 Pebble.addEventListener('ready', function() {

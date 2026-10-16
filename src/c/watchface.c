@@ -15,8 +15,13 @@
 #define MIN_CELL_GAP 2
 #define SUFFIX_GAP 2
 
-// Index order must match the stations in src/pkjs/config.js.
-enum { SECTION_NORTH, SECTION_SALEM, SECTION_CENTRAL, NUM_SECTIONS };
+// One section per departure row (header + times); must match ROWS in src/pkjs/config.js.
+#define NUM_SECTIONS 3
+// Includes the terminator; the settings page limits labels to 23 characters.
+#define LABEL_SIZE 24
+
+// How a row shows departures; must match MODE_* in src/pkjs/index.js.
+enum { MODE_CLOCK, MODE_MINUTES };
 
 // A departure blinks while inside its section's warning range, speeding up
 // from BLINK_SLOW_MS to BLINK_FAST_MS per toggle as the range end approaches.
@@ -24,10 +29,10 @@ enum { SECTION_NORTH, SECTION_SALEM, SECTION_CENTRAL, NUM_SECTIONS };
 #define BLINK_FAST_MS 125
 
 typedef struct {
-  int32_t north[NUM_TIMES];
-  int32_t salem[NUM_TIMES];
-  int32_t central[NUM_TIMES];
-  char central_dest[NUM_TIMES + 1];
+  int32_t times[NUM_SECTIONS][NUM_TIMES];
+  // One destination letter per departure, or ' ' for none.
+  char dest[NUM_SECTIONS][NUM_TIMES + 1];
+  uint8_t mode[NUM_SECTIONS];
 } TransitData;
 
 typedef struct {
@@ -36,6 +41,7 @@ typedef struct {
   uint8_t warn_end_min[NUM_SECTIONS];
   // New fields go at the end so older persisted settings still load.
   uint8_t departures;
+  char labels[NUM_SECTIONS][LABEL_SIZE];
 } Settings;
 
 typedef struct {
@@ -133,16 +139,44 @@ static void prv_draw_text(GContext *ctx, const char *text, GFont font, GRect box
   graphics_draw_text(ctx, text, font, box, GTextOverflowModeTrailingEllipsis, align, NULL);
 }
 
+static int prv_text_width(const char *text, GFont font);
+
+// Copies label into out, shortening the part before " > " with an ellipsis until
+// it fits in max_w so the direction stays visible.
+static void prv_fit_label(const char *label, GFont font, int max_w, char *out, size_t size) {
+  snprintf(out, size, "%s", label);
+  const char *sep = strstr(label, " > ");
+  if (!sep || prv_text_width(out, font) <= max_w) {
+    return;
+  }
+  int station_len = sep - label;
+  while (station_len > 1) {
+    station_len--;
+    while (station_len > 1 && label[station_len - 1] == ' ') {
+      station_len--;
+    }
+    snprintf(out, size, "%.*s\xE2\x80\xA6%s", station_len, label, sep);
+    if (prv_text_width(out, font) <= max_w) {
+      return;
+    }
+  }
+}
+
+// Draws a header bar; a long left label is shortened to fit before the right text.
 static void prv_draw_header(GContext *ctx, int y, int width, const char *left, const char *right) {
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, GRect(0, y, width, HEADER_HEIGHT), 0, GCornerNone);
   graphics_context_set_text_color(ctx, GColorBlack);
-  prv_draw_text(ctx, left, s_header_font, GRect(3, y - 3, width - 6, HEADER_HEIGHT + 4),
-                GTextAlignmentLeft);
+  int left_w = width - 6;
   if (right && right[0]) {
     prv_draw_text(ctx, right, s_header_font, GRect(3, y - 3, width - 6, HEADER_HEIGHT + 4),
                   GTextAlignmentRight);
+    left_w -= prv_text_width(right, s_header_font) + 4;
   }
+  char label[LABEL_SIZE + 4];
+  prv_fit_label(left, s_header_font, left_w, label, sizeof(label));
+  prv_draw_text(ctx, label, s_header_font, GRect(3, y - 3, left_w, HEADER_HEIGHT + 4),
+                GTextAlignmentLeft);
 }
 
 static void prv_format_wait(time_t t, time_t now, char *buf, size_t size) {
@@ -164,11 +198,7 @@ static int64_t prv_now_ms(void) {
 }
 
 static const int32_t *prv_section_times(int section) {
-  switch (section) {
-    case SECTION_NORTH: return s_data.north;
-    case SECTION_SALEM: return s_data.salem;
-    default: return s_data.central;
-  }
+  return s_data.times[section];
 }
 
 // Gets a section's warning range in ms before departure; false if disabled or empty.
@@ -205,25 +235,25 @@ static int prv_departures(void) {
 static int prv_build_cells(int section, time_t now, Cell *cells) {
   int32_t upcoming[MAX_DEPARTURES];
   char dest[MAX_DEPARTURES];
-  bool central = section == SECTION_CENTRAL;
-  int n = prv_upcoming(prv_section_times(section), central ? s_data.central_dest : NULL, now,
-                       upcoming, dest, prv_departures());
+  bool minutes = s_data.mode[section] == MODE_MINUTES;
+  int n = prv_upcoming(prv_section_times(section), s_data.dest[section], now, upcoming, dest,
+                       prv_departures());
   for (int i = 0; i < n; i++) {
     Cell *cell = &cells[i];
     cell->departure = upcoming[i];
     cell->suffix[0] = '\0';
-    if (central) {
+    if (minutes) {
       int mins = (int)((upcoming[i] - now) / 60);
       if (mins < 1) {
         snprintf(cell->text, sizeof(cell->text), "now");
       } else {
         snprintf(cell->text, sizeof(cell->text), "%d", mins);
       }
-      cell->suffix[0] = dest[i] == ' ' ? '\0' : dest[i];
-      cell->suffix[1] = '\0';
     } else {
       prv_format_clock(upcoming[i], cell->text, sizeof(cell->text));
     }
+    cell->suffix[0] = dest[i] == ' ' ? '\0' : dest[i];
+    cell->suffix[1] = '\0';
   }
   return n;
 }
@@ -320,9 +350,6 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
   time_t now = time(NULL);
   int64_t now_ms = prv_now_ms();
 
-  static const char *const labels[NUM_SECTIONS] = {
-    "NORTH STA > OUT", "SALEM > IN", "CENTRAL > SOUTH",
-  };
   Cell cells[NUM_SECTIONS][MAX_DEPARTURES];
   int counts[NUM_SECTIONS];
   for (int section = 0; section < NUM_SECTIONS; section++) {
@@ -347,7 +374,7 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
     if (counts[section] > 0) {
       prv_format_wait(cells[section][0].departure, now, right, sizeof(right));
     }
-    prv_draw_header(ctx, y, width, labels[section], right);
+    prv_draw_header(ctx, y, width, s_settings.labels[section], right);
     prv_draw_row(ctx, y + HEADER_HEIGHT, width, section, cells[section], counts[section], rf,
                  now_ms);
   }
@@ -436,12 +463,16 @@ static void prv_default_settings(void) {
     .warn_start_min = { 30, 15, 10 },
     .warn_end_min = { 25, 10, 5 },
     .departures = DEFAULT_DEPARTURES,
+    .labels = { "NORTH STA > OUT", "SALEM > IN", "CENTRAL > SOUTH" },
   };
 }
 
 static void prv_load_settings(void) {
   prv_default_settings();
   persist_read_data(PERSIST_KEY_SETTINGS, &s_settings, sizeof(s_settings));
+  for (int section = 0; section < NUM_SECTIONS; section++) {
+    s_settings.labels[section][LABEL_SIZE - 1] = '\0';
+  }
 }
 
 // Clay may send integers of varying widths (or numeric strings).
@@ -479,6 +510,11 @@ static bool prv_read_settings(DictionaryIterator *iter) {
       s_settings.warn_end_min[section] = prv_clamp_minutes(prv_tuple_int(t));
       changed = true;
     }
+    if ((t = dict_find(iter, MESSAGE_KEY_LABEL + section)) && t->type == TUPLE_CSTRING) {
+      strncpy(s_settings.labels[section], t->value->cstring, LABEL_SIZE - 1);
+      s_settings.labels[section][LABEL_SIZE - 1] = '\0';
+      changed = true;
+    }
   }
   Tuple *t = dict_find(iter, MESSAGE_KEY_DEPARTURES);
   if (t) {
@@ -504,28 +540,26 @@ static void prv_request_update(void) {
 
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   bool changed = false;
-  for (int i = 0; i < NUM_TIMES; i++) {
+  for (int section = 0; section < NUM_SECTIONS; section++) {
     Tuple *t;
-    if ((t = dict_find(iter, MESSAGE_KEY_N_TIMES + i))) {
-      s_data.north[i] = t->value->int32;
+    for (int i = 0; i < NUM_TIMES; i++) {
+      if ((t = dict_find(iter, MESSAGE_KEY_TIMES + section * NUM_TIMES + i))) {
+        s_data.times[section][i] = prv_tuple_int(t);
+        changed = true;
+      }
+    }
+    if ((t = dict_find(iter, MESSAGE_KEY_DEST + section)) && t->type == TUPLE_CSTRING) {
+      char *dest = s_data.dest[section];
+      memset(dest, ' ', NUM_TIMES);
+      size_t len = strlen(t->value->cstring);
+      memcpy(dest, t->value->cstring, len < NUM_TIMES ? len : NUM_TIMES);
+      dest[NUM_TIMES] = '\0';
       changed = true;
     }
-    if ((t = dict_find(iter, MESSAGE_KEY_S_TIMES + i))) {
-      s_data.salem[i] = t->value->int32;
+    if ((t = dict_find(iter, MESSAGE_KEY_MODE + section))) {
+      s_data.mode[section] = prv_tuple_int(t) == MODE_MINUTES ? MODE_MINUTES : MODE_CLOCK;
       changed = true;
     }
-    if ((t = dict_find(iter, MESSAGE_KEY_C_TIMES + i))) {
-      s_data.central[i] = t->value->int32;
-      changed = true;
-    }
-  }
-  Tuple *dest = dict_find(iter, MESSAGE_KEY_C_DEST);
-  if (dest) {
-    memset(s_data.central_dest, ' ', NUM_TIMES);
-    size_t len = strlen(dest->value->cstring);
-    memcpy(s_data.central_dest, dest->value->cstring, len < NUM_TIMES ? len : NUM_TIMES);
-    s_data.central_dest[NUM_TIMES] = '\0';
-    changed = true;
   }
 
   if (changed) {
@@ -581,7 +615,9 @@ static void prv_init(void) {
     // Saved data from an older layout may have been partially read; discard it.
     memset(&s_data, 0, sizeof(s_data));
   }
-  s_data.central_dest[NUM_TIMES] = '\0';
+  for (int section = 0; section < NUM_SECTIONS; section++) {
+    s_data.dest[section][NUM_TIMES] = '\0';
+  }
 
   time_t now = time(NULL);
   prv_update_time_string(localtime(&now));
