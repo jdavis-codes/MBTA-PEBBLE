@@ -41,6 +41,22 @@ function warningSection(station, i) {
 module.exports = [
   { type: 'heading', defaultValue: 'MBTA Commute' },
   {
+    type: 'section',
+    items: [
+      { type: 'heading', defaultValue: 'Display' },
+      {
+        type: 'slider',
+        messageKey: 'DEPARTURES',
+        label: 'Departures shown per station',
+        description: 'The text gets smaller to fit 4 or 5 departures on one line.',
+        defaultValue: 3,
+        min: 1,
+        max: 5,
+        step: 1
+      }
+    ]
+  },
+  {
     type: 'text',
     defaultValue: 'A departure blinks while it is inside its warning range, ' +
                   'blinking faster as the stop time approaches.'

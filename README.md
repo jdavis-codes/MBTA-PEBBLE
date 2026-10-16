@@ -9,15 +9,19 @@ PebbleKit JS (`src/pkjs/index.js`):
 - **Central → Southbound** Red Line: minutes until next 3 trains
   (`A` = Ashmont, `B` = Braintree)
 
-### Departure warnings
+### Settings
 
-Each station has a configurable *departure warning range* (settings page via
-[Clay](https://github.com/pebble-dev/clay), defined in `src/pkjs/config.js`).
-While a departure is inside its range it blinks (inverted), blinking faster as
-the end of the range approaches — a cue that it's time to leave. Defaults:
-North Station on, 30 → 25 min; Salem 15 → 10 and Central 10 → 5, both off.
+Open the settings page (via [Clay](https://github.com/pebble-dev/clay), defined
+in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
+`pebble emu-app-config --emulator diorite`.
 
-Open the settings in the emulator with `pebble emu-app-config --emulator diorite`.
+- **Departures shown per station** (1–5, default 3). Each station's departures
+  stay on one line; with 4 or 5 the text shrinks to fit and the clock gets
+  the freed-up space.
+- **Departure warning** per station: while a departure is inside its range it
+  blinks (inverted), blinking faster as the end of the range approaches — a
+  cue that it's time to leave. Defaults: North Station on, 30 → 25 min;
+  Salem 15 → 10 and Central 10 → 5, both off.
 
 Commuter rail times are scheduled times, replaced by live predictions when
 the MBTA has them (cancelled trips are hidden). The watch requests fresh data

@@ -26,13 +26,14 @@
     ],
     "messageKeys": [
       "REQUEST",
-      "N_TIMES[4]",
-      "S_TIMES[4]",
-      "C_TIMES[4]",
+      "N_TIMES[7]",
+      "S_TIMES[7]",
+      "C_TIMES[7]",
       "C_DEST",
       "WARN_ON[3]",
       "WARN_START[3]",
-      "WARN_END[3]"
+      "WARN_END[3]",
+      "DEPARTURES"
     ],
     "resources": {
       "media": []

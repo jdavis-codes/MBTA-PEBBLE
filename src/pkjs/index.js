@@ -1,13 +1,15 @@
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
-var clay = new Clay(clayConfig);
+// Settings are sent manually so a save that collides with a data update is retried.
+var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
 
 var keys = require('message_keys');
 
 var API_BASE = 'https://api-v3.mbta.com';
 // Optional: a free key from https://api-v3.mbta.com/ raises the rate limit.
 var MBTA_API_KEY = '';
-var MAX_TIMES = 4;
+// Must match NUM_TIMES in src/c/watchface.c.
+var MAX_TIMES = 7;
 // Look back this far when querying schedules so delayed trains are still found.
 var LOOKBACK_MS = 20 * 60 * 1000;
 
@@ -112,7 +114,7 @@ function fetchCommuterRail(stop, directionId, callback) {
     'filter[min_time]': win.minTime,
     'include': 'prediction',
     'sort': 'departure_time',
-    'page[limit]': 12,
+    'page[limit]': 20,
     'fields[schedule]': 'departure_time,arrival_time',
     'fields[prediction]': 'departure_time,arrival_time,schedule_relationship'
   }, function(err, json) {
@@ -144,7 +146,7 @@ function fetchCentral(callback) {
     'filter[direction_id]': 0,
     'include': 'trip',
     'sort': 'departure_time',
-    'page[limit]': 10,
+    'page[limit]': 15,
     'fields[prediction]': 'departure_time,arrival_time,schedule_relationship',
     'fields[trip]': 'headsign'
   }, function(err, json) {
@@ -173,13 +175,14 @@ function putTimes(dict, baseKey, times) {
   }
 }
 
-function sendToWatch(dict, retries) {
+function sendToWatch(dict, retries, what) {
+  what = what || 'transit data';
   Pebble.sendAppMessage(dict, function() {
-    console.log('Sent transit data to watch');
+    console.log('Sent ' + what + ' to watch');
   }, function(e) {
-    console.log('Failed to send transit data: ' + JSON.stringify(e));
+    console.log('Failed to send ' + what + ': ' + JSON.stringify(e));
     if (retries > 0) {
-      setTimeout(function() { sendToWatch(dict, retries - 1); }, 2000);
+      setTimeout(function() { sendToWatch(dict, retries - 1, what); }, 2000);
     }
   });
 }
@@ -225,6 +228,15 @@ function refresh() {
     done();
   });
 }
+
+Pebble.addEventListener('showConfiguration', function() {
+  Pebble.openURL(clay.generateUrl());
+});
+
+Pebble.addEventListener('webviewclosed', function(e) {
+  if (!e || !e.response) return;
+  sendToWatch(clay.getSettings(e.response), 3, 'settings');
+});
 
 Pebble.addEventListener('ready', function() {
   console.log('PebbleKit JS ready');

@@ -1,14 +1,19 @@
 #include <pebble.h>
 
-#define NUM_TIMES 4
-#define NUM_COLUMNS 3
+// The phone sends a few more departures than can be shown so the row stays
+// full as trains leave between refreshes.
+#define NUM_TIMES 7
+#define MIN_DEPARTURES 1
+#define MAX_DEPARTURES 5
+#define DEFAULT_DEPARTURES 3
 #define REFRESH_MINUTES 2
 #define PERSIST_KEY_DATA 1
 #define PERSIST_KEY_SETTINGS 2
 
 #define TIME_HEIGHT 45
 #define HEADER_HEIGHT 15
-#define SECTION_HEIGHT 41
+#define MIN_CELL_GAP 2
+#define SUFFIX_GAP 2
 
 // Index order must match the stations in src/pkjs/config.js.
 enum { SECTION_NORTH, SECTION_SALEM, SECTION_CENTRAL, NUM_SECTIONS };
@@ -29,6 +34,8 @@ typedef struct {
   bool warn_on[NUM_SECTIONS];
   uint8_t warn_start_min[NUM_SECTIONS];
   uint8_t warn_end_min[NUM_SECTIONS];
+  // New fields go at the end so older persisted settings still load.
+  uint8_t departures;
 } Settings;
 
 typedef struct {
@@ -36,6 +43,38 @@ typedef struct {
   bool inverted;
   int64_t next_toggle_ms;
 } BlinkState;
+
+// A departure row's font plus its vertical metrics. text_dy/suffix_dy offset the
+// text box from the row top to compensate for the fonts' built-in top padding.
+typedef struct {
+  const char *key;
+  const char *suffix_key;
+  int row_h;
+  int text_dy;
+  int suffix_dy;
+} RowFontSpec;
+
+static const RowFontSpec s_row_font_specs[] = {
+  { FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_14_BOLD, 26, -4, 5 },
+  { FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_14_BOLD, 20, -3, 1 },
+  { FONT_KEY_GOTHIC_18,      FONT_KEY_GOTHIC_14,      20, -3, 1 },
+  { FONT_KEY_GOTHIC_14_BOLD, FONT_KEY_GOTHIC_14_BOLD, 16, -2, -2 },
+  { FONT_KEY_GOTHIC_14,      FONT_KEY_GOTHIC_14,      16, -2, -2 },
+};
+#define NUM_ROW_FONTS ((int)ARRAY_LENGTH(s_row_font_specs))
+
+typedef struct {
+  GFont font;
+  GFont suffix_font;
+  const RowFontSpec *spec;
+} RowFont;
+
+// One departure as displayed: main text plus an optional small suffix letter.
+typedef struct {
+  int32_t departure;
+  char text[12];
+  char suffix[2];
+} Cell;
 
 static Window *s_window;
 static Layer *s_canvas;
@@ -48,8 +87,7 @@ static BlinkState s_blink[NUM_SECTIONS];
 
 static GFont s_time_font;
 static GFont s_header_font;
-static GFont s_value_font;
-static GFont s_small_font;
+static RowFont s_row_fonts[ARRAY_LENGTH(s_row_font_specs)];
 
 static void prv_update_time_string(struct tm *tick_time) {
   if (clock_is_24h_style()) {
@@ -107,12 +145,6 @@ static void prv_draw_header(GContext *ctx, int y, int width, const char *left, c
   }
 }
 
-static void prv_draw_empty(GContext *ctx, int y, int width) {
-  graphics_context_set_text_color(ctx, GColorWhite);
-  prv_draw_text(ctx, s_has_data ? "No trains" : "Loading...", s_value_font,
-                GRect(0, y, width, 28), GTextAlignmentCenter);
-}
-
 static void prv_format_wait(time_t t, time_t now, char *buf, size_t size) {
   int mins = (int)((t - now) / 60);
   if (mins < 1) {
@@ -164,92 +196,121 @@ static bool prv_is_highlighted(int section, int32_t departure, int64_t now_ms) {
   return s_blink[section].inverted && prv_in_blink_window(section, departure, now_ms);
 }
 
-// Fills the column's full value row, flush with the header bars above and below.
-static void prv_draw_highlight(GContext *ctx, int col, int col_w, int section_y) {
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  graphics_fill_rect(ctx,
-                     GRect(col * col_w, section_y + HEADER_HEIGHT, col_w,
-                           SECTION_HEIGHT - HEADER_HEIGHT),
-                     0, GCornerNone);
+static int prv_departures(void) {
+  int n = s_settings.departures;
+  return n < MIN_DEPARTURES ? MIN_DEPARTURES : n > MAX_DEPARTURES ? MAX_DEPARTURES : n;
 }
 
-static void prv_draw_commuter_section(GContext *ctx, int y, int width, const char *label,
-                                      int section, time_t now) {
-  const int32_t *times = prv_section_times(section);
-  int32_t upcoming[NUM_COLUMNS];
-  int n = prv_upcoming(times, NULL, now, upcoming, NULL, NUM_COLUMNS);
-
-  char wait[16] = "";
-  if (n > 0) {
-    prv_format_wait(upcoming[0], now, wait, sizeof(wait));
-  }
-  prv_draw_header(ctx, y, width, label, wait);
-
-  int values_y = y + HEADER_HEIGHT - 4;
-  if (n == 0) {
-    prv_draw_empty(ctx, values_y, width);
-    return;
-  }
-
-  int64_t now_ms = prv_now_ms();
-  int col_w = width / NUM_COLUMNS;
+// Builds the visible cells for a section; returns how many there are.
+static int prv_build_cells(int section, time_t now, Cell *cells) {
+  int32_t upcoming[MAX_DEPARTURES];
+  char dest[MAX_DEPARTURES];
+  bool central = section == SECTION_CENTRAL;
+  int n = prv_upcoming(prv_section_times(section), central ? s_data.central_dest : NULL, now,
+                       upcoming, dest, prv_departures());
   for (int i = 0; i < n; i++) {
-    char buf[8];
-    prv_format_clock(upcoming[i], buf, sizeof(buf));
-    bool inverted = prv_is_highlighted(section, upcoming[i], now_ms);
-    if (inverted) {
-      prv_draw_highlight(ctx, i, col_w, y);
-    }
-    graphics_context_set_text_color(ctx, inverted ? GColorBlack : GColorWhite);
-    prv_draw_text(ctx, buf, s_value_font, GRect(i * col_w, values_y, col_w, 28),
-                  GTextAlignmentCenter);
-  }
-}
-
-static void prv_draw_central_section(GContext *ctx, int y, int width, time_t now) {
-  int32_t upcoming[NUM_COLUMNS];
-  char dest[NUM_COLUMNS];
-  int n = prv_upcoming(s_data.central, s_data.central_dest, now, upcoming, dest, NUM_COLUMNS);
-
-  prv_draw_header(ctx, y, width, "CENTRAL > SOUTH", "min");
-
-  int values_y = y + HEADER_HEIGHT - 4;
-  if (n == 0) {
-    prv_draw_empty(ctx, values_y, width);
-    return;
-  }
-
-  int64_t now_ms = prv_now_ms();
-  int col_w = width / NUM_COLUMNS;
-  for (int i = 0; i < n; i++) {
-    int mins = (int)((upcoming[i] - now) / 60);
-    char num[12];
-    char letter[2] = { dest[i], '\0' };
-    if (mins < 1) {
-      snprintf(num, sizeof(num), "now");
+    Cell *cell = &cells[i];
+    cell->departure = upcoming[i];
+    cell->suffix[0] = '\0';
+    if (central) {
+      int mins = (int)((upcoming[i] - now) / 60);
+      if (mins < 1) {
+        snprintf(cell->text, sizeof(cell->text), "now");
+      } else {
+        snprintf(cell->text, sizeof(cell->text), "%d", mins);
+      }
+      cell->suffix[0] = dest[i] == ' ' ? '\0' : dest[i];
+      cell->suffix[1] = '\0';
     } else {
-      snprintf(num, sizeof(num), "%d", mins);
+      prv_format_clock(upcoming[i], cell->text, sizeof(cell->text));
     }
+  }
+  return n;
+}
 
-    bool inverted = prv_is_highlighted(SECTION_CENTRAL, upcoming[i], now_ms);
+static int prv_text_width(const char *text, GFont font) {
+  return graphics_text_layout_get_content_size(text, font, GRect(0, 0, 200, 40),
+                                               GTextOverflowModeWordWrap,
+                                               GTextAlignmentLeft).w;
+}
+
+static int prv_cell_width(const Cell *cell, const RowFont *rf, int *text_w) {
+  *text_w = prv_text_width(cell->text, rf->font);
+  if (!cell->suffix[0]) {
+    return *text_w;
+  }
+  return *text_w + SUFFIX_GAP + prv_text_width(cell->suffix, rf->suffix_font);
+}
+
+// Picks the largest font allowed for the departure count that fits every row on one line.
+static const RowFont *prv_pick_row_font(Cell cells[][MAX_DEPARTURES], const int *counts,
+                                        int width) {
+  int count = prv_departures();
+  int first = count <= 3 ? 0 : count == 4 ? 1 : 3;
+  for (int f = first; f < NUM_ROW_FONTS; f++) {
+    bool fits = true;
+    for (int section = 0; section < NUM_SECTIONS && fits; section++) {
+      int total = counts[section] * MIN_CELL_GAP;
+      for (int i = 0; i < counts[section]; i++) {
+        int text_w;
+        total += prv_cell_width(&cells[section][i], &s_row_fonts[f], &text_w);
+      }
+      fits = total <= width;
+    }
+    if (fits) {
+      return &s_row_fonts[f];
+    }
+  }
+  return &s_row_fonts[NUM_ROW_FONTS - 1];
+}
+
+// Draws a row of cells. Each cell gets a slot sized to its content plus an even
+// share of the spare width; a blinking cell fills its whole slot.
+static void prv_draw_row(GContext *ctx, int row_y, int width, int section, const Cell *cells,
+                         int n, const RowFont *rf, int64_t now_ms) {
+  const RowFontSpec *spec = rf->spec;
+  if (n == 0) {
+    graphics_context_set_text_color(ctx, GColorWhite);
+    prv_draw_text(ctx, s_has_data ? "No trains" : "Loading...", rf->font,
+                  GRect(0, row_y + spec->text_dy, width, spec->row_h + 8), GTextAlignmentCenter);
+    return;
+  }
+
+  int widths[MAX_DEPARTURES];
+  int text_ws[MAX_DEPARTURES];
+  int total = 0;
+  for (int i = 0; i < n; i++) {
+    widths[i] = prv_cell_width(&cells[i], rf, &text_ws[i]);
+    total += widths[i];
+  }
+  int spare = width - total;
+  if (spare < 0) {
+    spare = 0;
+  }
+
+  int x = 0;
+  for (int i = 0; i < n; i++) {
+    int slot = widths[i] + spare / n + (i < spare % n ? 1 : 0);
+    if (i == n - 1) {
+      slot = width - x;
+    }
+    bool inverted = prv_is_highlighted(section, cells[i].departure, now_ms);
     if (inverted) {
-      prv_draw_highlight(ctx, i, col_w, y);
+      graphics_context_set_fill_color(ctx, GColorWhite);
+      graphics_fill_rect(ctx, GRect(x, row_y, slot, spec->row_h), 0, GCornerNone);
     }
     graphics_context_set_text_color(ctx, inverted ? GColorBlack : GColorWhite);
 
-    // Center the "<minutes><destination letter>" pair within its column.
-    GRect col = GRect(i * col_w, values_y, col_w, 28);
-    GSize num_size = graphics_text_layout_get_content_size(
-        num, s_value_font, col, GTextOverflowModeWordWrap, GTextAlignmentLeft);
-    GSize letter_size = graphics_text_layout_get_content_size(
-        letter, s_small_font, col, GTextOverflowModeWordWrap, GTextAlignmentLeft);
-    int gap = 2;
-    int x = col.origin.x + (col_w - (num_size.w + gap + letter_size.w)) / 2;
-    prv_draw_text(ctx, num, s_value_font, GRect(x, values_y, num_size.w + 4, 28),
+    int tx = x + (slot - widths[i]) / 2;
+    prv_draw_text(ctx, cells[i].text, rf->font,
+                  GRect(tx, row_y + spec->text_dy, text_ws[i] + 4, spec->row_h + 8),
                   GTextAlignmentLeft);
-    prv_draw_text(ctx, letter, s_small_font,
-                  GRect(x + num_size.w + gap, values_y + 9, letter_size.w + 4, 20),
-                  GTextAlignmentLeft);
+    if (cells[i].suffix[0]) {
+      prv_draw_text(ctx, cells[i].suffix, rf->suffix_font,
+                    GRect(tx + text_ws[i] + SUFFIX_GAP, row_y + spec->suffix_dy, 20, 20),
+                    GTextAlignmentLeft);
+    }
+    x += slot;
   }
 }
 
@@ -257,20 +318,39 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   int width = bounds.size.w;
   time_t now = time(NULL);
+  int64_t now_ms = prv_now_ms();
+
+  static const char *const labels[NUM_SECTIONS] = {
+    "NORTH STA > OUT", "SALEM > IN", "CENTRAL > SOUTH",
+  };
+  Cell cells[NUM_SECTIONS][MAX_DEPARTURES];
+  int counts[NUM_SECTIONS];
+  for (int section = 0; section < NUM_SECTIONS; section++) {
+    counts[section] = prv_build_cells(section, now, cells[section]);
+  }
+  const RowFont *rf = prv_pick_row_font(cells, counts, width);
 
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
+  // Sections stack from the bottom; the clock is centred in whatever space remains.
+  int section_h = HEADER_HEIGHT + rf->spec->row_h;
+  int sections_top = bounds.size.h - NUM_SECTIONS * section_h;
   graphics_context_set_text_color(ctx, GColorWhite);
-  prv_draw_text(ctx, s_time_buffer, s_time_font, GRect(0, 0, width, TIME_HEIGHT),
+  prv_draw_text(ctx, s_time_buffer, s_time_font,
+                GRect(0, (sections_top - TIME_HEIGHT) / 2, width, TIME_HEIGHT),
                 GTextAlignmentCenter);
 
-  int y = TIME_HEIGHT;
-  prv_draw_commuter_section(ctx, y, width, "NORTH STA > OUT", SECTION_NORTH, now);
-  y += SECTION_HEIGHT;
-  prv_draw_commuter_section(ctx, y, width, "SALEM > IN", SECTION_SALEM, now);
-  y += SECTION_HEIGHT;
-  prv_draw_central_section(ctx, y, width, now);
+  for (int section = 0; section < NUM_SECTIONS; section++) {
+    int y = sections_top + section * section_h;
+    char right[16] = "";
+    if (counts[section] > 0) {
+      prv_format_wait(cells[section][0].departure, now, right, sizeof(right));
+    }
+    prv_draw_header(ctx, y, width, labels[section], right);
+    prv_draw_row(ctx, y + HEADER_HEIGHT, width, section, cells[section], counts[section], rf,
+                 now_ms);
+  }
 }
 
 static void prv_blink_timer_cb(void *context);
@@ -292,12 +372,12 @@ static void prv_update_blink(void) {
     int64_t until_start = -1;
 
     if (prv_warning_range(section, &lo, &hi)) {
-      const int32_t *times = prv_section_times(section);
-      for (int i = 0; i < NUM_TIMES; i++) {
-        if (times[i] <= 0) {
-          continue;
-        }
-        int64_t remaining = (int64_t)times[i] * 1000 - now_ms;
+      // Only departures that are actually on screen can blink.
+      int32_t visible[MAX_DEPARTURES];
+      int n = prv_upcoming(prv_section_times(section), NULL, (time_t)(now_ms / 1000), visible,
+                           NULL, prv_departures());
+      for (int i = 0; i < n; i++) {
+        int64_t remaining = (int64_t)visible[i] * 1000 - now_ms;
         if (remaining > lo && remaining <= hi) {
           if (nearest_in_range < 0 || remaining < nearest_in_range) {
             nearest_in_range = remaining;
@@ -355,6 +435,7 @@ static void prv_default_settings(void) {
     .warn_on = { true, false, false },
     .warn_start_min = { 30, 15, 10 },
     .warn_end_min = { 25, 10, 5 },
+    .departures = DEFAULT_DEPARTURES,
   };
 }
 
@@ -398,6 +479,13 @@ static bool prv_read_settings(DictionaryIterator *iter) {
       s_settings.warn_end_min[section] = prv_clamp_minutes(prv_tuple_int(t));
       changed = true;
     }
+  }
+  Tuple *t = dict_find(iter, MESSAGE_KEY_DEPARTURES);
+  if (t) {
+    int32_t v = prv_tuple_int(t);
+    s_settings.departures = v < MIN_DEPARTURES ? MIN_DEPARTURES
+                          : v > MAX_DEPARTURES ? MAX_DEPARTURES : (uint8_t)v;
+    changed = true;
   }
   if (changed) {
     persist_write_data(PERSIST_KEY_SETTINGS, &s_settings, sizeof(s_settings));
@@ -477,13 +565,21 @@ static void prv_init(void) {
 
   s_time_font = fonts_get_system_font(FONT_KEY_LECO_36_BOLD_NUMBERS);
   s_header_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  s_value_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  s_small_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  for (int f = 0; f < NUM_ROW_FONTS; f++) {
+    s_row_fonts[f] = (RowFont) {
+      .font = fonts_get_system_font(s_row_font_specs[f].key),
+      .suffix_font = fonts_get_system_font(s_row_font_specs[f].suffix_key),
+      .spec = &s_row_font_specs[f],
+    };
+  }
 
   memset(&s_data, 0, sizeof(s_data));
   if (persist_exists(PERSIST_KEY_DATA) &&
       persist_read_data(PERSIST_KEY_DATA, &s_data, sizeof(s_data)) == (int)sizeof(s_data)) {
     s_has_data = true;
+  } else {
+    // Saved data from an older layout may have been partially read; discard it.
+    memset(&s_data, 0, sizeof(s_data));
   }
   s_data.central_dest[NUM_TIMES] = '\0';
 
