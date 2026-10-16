@@ -1,0 +1,41 @@
+{
+  "name": "watchface",
+  "author": "MakeAwesomeHappen",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {
+    "@rebble/clay": "^1.1.0"
+  },
+  "pebble": {
+    "displayName": "MBTA Commute",
+    "uuid": "B9286907-5415-4CEC-AA9E-046AA3F96D70",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "diorite",
+      "flint"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "capabilities": [
+      "configurable"
+    ],
+    "messageKeys": [
+      "REQUEST",
+      "N_TIMES[4]",
+      "S_TIMES[4]",
+      "C_TIMES[4]",
+      "C_DEST",
+      "WARN_ON[3]",
+      "WARN_START[3]",
+      "WARN_END[3]"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}
