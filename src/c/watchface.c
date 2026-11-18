@@ -14,6 +14,9 @@
 #define HEADER_HEIGHT 15
 #define MIN_CELL_GAP 2
 #define SUFFIX_GAP 2
+// Phone connection dot in the top right corner: filled when connected, hollow when not.
+#define BT_DOT_RADIUS 3
+#define BT_DOT_MARGIN 3
 
 // One section per departure row (header + times); must match ROWS in src/pkjs/config.js.
 #define NUM_SECTIONS 3
@@ -87,6 +90,7 @@ static Layer *s_canvas;
 static TransitData s_data;
 static Settings s_settings;
 static bool s_has_data;
+static bool s_connected;
 static char s_time_buffer[8];
 static AppTimer *s_blink_timer;
 static BlinkState s_blink[NUM_SECTIONS];
@@ -368,6 +372,15 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
                 GRect(0, (sections_top - TIME_HEIGHT) / 2, width, TIME_HEIGHT),
                 GTextAlignmentCenter);
 
+  GPoint dot = GPoint(width - BT_DOT_MARGIN - BT_DOT_RADIUS - 1, BT_DOT_MARGIN + BT_DOT_RADIUS);
+  if (s_connected) {
+    graphics_context_set_fill_color(ctx, GColorWhite);
+    graphics_fill_circle(ctx, dot, BT_DOT_RADIUS);
+  } else {
+    graphics_context_set_stroke_color(ctx, GColorWhite);
+    graphics_draw_circle(ctx, dot, BT_DOT_RADIUS);
+  }
+
   for (int section = 0; section < NUM_SECTIONS; section++) {
     int y = sections_top + section * section_h;
     char right[16] = "";
@@ -583,6 +596,13 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   }
 }
 
+static void prv_connection_handler(bool connected) {
+  s_connected = connected;
+  if (s_canvas) {
+    layer_mark_dirty(s_canvas);
+  }
+}
+
 static void prv_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   s_canvas = layer_create(layer_get_bounds(window_layer));
@@ -634,6 +654,10 @@ static void prv_init(void) {
   app_message_open(512, 64);
 
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
+  connection_service_subscribe((ConnectionHandlers) {
+    .pebble_app_connection_handler = prv_connection_handler,
+  });
+  prv_connection_handler(connection_service_peek_pebble_app_connection());
   prv_update_blink();
 }
 
@@ -642,6 +666,7 @@ static void prv_deinit(void) {
     app_timer_cancel(s_blink_timer);
   }
   tick_timer_service_unsubscribe();
+  connection_service_unsubscribe();
   app_message_deregister_callbacks();
   window_destroy(s_window);
 }
