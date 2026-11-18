@@ -15,9 +15,10 @@
 // doing, so that after a crash or a watch reset the next launch can report it
 // to the phone (and to `pebble logs`). The live state goes out once a minute as
 // a heartbeat log line.
-#define DIAG_VERSION 1
+#define DIAG_VERSION 2
 #define DIAG_PERSIST_MINUTES 10
-enum { STAGE_INIT, STAGE_RUNNING };
+// STAGE_SCROLL's detail is how far the alert had scrolled, in units of 8px.
+enum { STAGE_INIT, STAGE_RUNNING, STAGE_SCROLL };
 
 typedef struct {
   uint32_t launches;
@@ -29,7 +30,20 @@ typedef struct {
   uint8_t detail;
   uint8_t clean_exit;
   uint8_t version;
+  // Set when a run died while an alert was scrolling: alerts then stay off
+  // until the settings are saved again, so a bad scroll cannot reset-loop the watch.
+  uint8_t alerts_blocked;
 } Diag;
+
+// Includes the terminator; must match ALERT_MAX_CHARS + 1 in src/pkjs/index.js.
+#define ALERT_SIZE 161
+// A service alert scrolls across its row's label once a minute. The watch
+// takes 50-160ms to redraw, so each frame is followed by an idle gap and the
+// position comes from the clock, not from a frame count.
+#define SCROLL_PX_PER_SEC 45
+#define SCROLL_IDLE_MS 100
+#define SCROLL_BREADCRUMB_MS 2000
+
 
 #define TIME_HEIGHT 45
 #define HEADER_HEIGHT 15
@@ -136,9 +150,26 @@ static int s_fetch_ticks;
 static time_t s_last_request;
 static Diag s_diag;
 // The previous run's breadcrumb as text, until the phone has received it.
-static char s_prev_diag[80];
+static char s_prev_diag[96];
 static bool s_prev_diag_pending;
 static uint16_t s_max_draw_ms;
+
+static char s_alerts[NUM_SECTIONS][ALERT_SIZE];
+// Pixel width of each alert character, and their total.
+static uint8_t s_alert_cw[NUM_SECTIONS][ALERT_SIZE];
+static int s_alert_w[NUM_SECTIONS];
+// When the current scroll pass started, or 0 when none is running.
+static int64_t s_scroll_start_ms;
+static int64_t s_scroll_breadcrumb_ms;
+static AppTimer *s_scroll_timer;
+static uint16_t s_scroll_frames;
+
+// What each row shows, rebuilt only when the minute, the data or the settings
+// change, so scroll frames redraw without re-measuring text.
+static Cell s_cells[NUM_SECTIONS][MAX_DEPARTURES];
+static int s_counts[NUM_SECTIONS];
+static char s_wait[NUM_SECTIONS][16];
+static bool s_layout_stale = true;
 static char s_time_buffer[8];
 static AppTimer *s_blink_timer;
 static BlinkState s_blink[NUM_SECTIONS];
@@ -146,6 +177,7 @@ static BlinkState s_blink[NUM_SECTIONS];
 static GFont s_time_font;
 static GFont s_header_font;
 static RowFont s_row_fonts[ARRAY_LENGTH(s_row_font_specs)];
+static const RowFont *s_row_font;
 
 static void prv_update_time_string(struct tm *tick_time) {
   if (clock_is_24h_style()) {
@@ -219,8 +251,22 @@ static void prv_fit_label(const char *label, GFont font, int max_w, char *out, s
   }
 }
 
-// Draws a header bar; a long left label is shortened to fit before the right text.
-static void prv_draw_header(GContext *ctx, int y, int width, const char *left, const char *right) {
+// Pixels scrolled in the current pass.
+static int prv_scroll_px(int64_t now_ms) {
+  return (int)((now_ms - s_scroll_start_ms) * SCROLL_PX_PER_SEC / 1000);
+}
+
+// The alert enters at the right edge of the label area and leaves at the left.
+static bool prv_alert_scrolling(int section, int area_w, int64_t now_ms) {
+  return s_scroll_start_ms && s_alerts[section][0] &&
+         prv_scroll_px(now_ms) < area_w + s_alert_w[section];
+}
+
+// Draws a header bar; a long left label is shortened to fit before the right
+// text. A row with a service alert shows it scrolling through the label area,
+// and "!" before the label between passes.
+static void prv_draw_header(GContext *ctx, int y, int width, int section, const char *right,
+                            int64_t now_ms) {
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, GRect(0, y, width, HEADER_HEIGHT), 0, GCornerNone);
   graphics_context_set_text_color(ctx, GColorBlack);
@@ -230,10 +276,45 @@ static void prv_draw_header(GContext *ctx, int y, int width, const char *left, c
                   GTextAlignmentRight);
     left_w -= prv_text_width(right, s_header_font) + 4;
   }
-  char label[LABEL_SIZE + 4];
-  prv_fit_label(left, s_header_font, left_w, label, sizeof(label));
-  prv_draw_text(ctx, label, s_header_font, GRect(3, y - 3, left_w, HEADER_HEIGHT + 4),
-                GTextAlignmentLeft);
+  GRect text_box = GRect(3, y - 3, left_w, HEADER_HEIGHT + 4);
+
+  if (prv_alert_scrolling(section, left_w, now_ms)) {
+    // Only whole characters that lie fully inside the label area are drawn,
+    // as one short string: nothing is ever drawn partly off-screen.
+    const char *alert = s_alerts[section];
+    const uint8_t *cw = s_alert_cw[section];
+    int x = left_w - prv_scroll_px(now_ms);
+    int i = 0;
+    while (alert[i] && x < 0) {
+      x += cw[i++];
+    }
+    static char visible[48];
+    int n = 0;
+    int visible_w = 0;
+    while (alert[i + n] && n < (int)sizeof(visible) - 1 &&
+           x + visible_w + cw[i + n] <= left_w) {
+      visible[n] = alert[i + n];
+      visible_w += cw[i + n];
+      n++;
+    }
+    visible[n] = '\0';
+    if (n > 0) {
+      text_box.origin.x += x;
+      text_box.size.w = visible_w + 8;
+      prv_draw_text(ctx, visible, s_header_font, text_box, GTextAlignmentLeft);
+    }
+    return;
+  }
+
+  if (s_alerts[section][0]) {
+    int mark_w = prv_text_width("!", s_header_font) + 3;
+    prv_draw_text(ctx, "!", s_header_font, text_box, GTextAlignmentLeft);
+    text_box.origin.x += mark_w;
+    text_box.size.w -= mark_w;
+  }
+  static char label[LABEL_SIZE + 4];
+  prv_fit_label(s_settings.labels[section], s_header_font, text_box.size.w, label, sizeof(label));
+  prv_draw_text(ctx, label, s_header_font, text_box, GTextAlignmentLeft);
 }
 
 static void prv_format_wait(time_t t, time_t now, char *buf, size_t size) {
@@ -499,14 +580,16 @@ static void prv_breadcrumb(uint8_t stage, uint8_t detail) {
 static void prv_diag_init(void) {
   Diag prev;
   uint32_t launches = 0;
+  bool blocked = false;
   if (persist_read_data(PERSIST_KEY_DIAG, &prev, sizeof(prev)) == (int)sizeof(prev) &&
       prev.version == DIAG_VERSION) {
     launches = prev.launches;
+    blocked = prev.alerts_blocked || (!prev.clean_exit && prev.stage == STAGE_SCROLL);
     snprintf(s_prev_diag, sizeof(s_prev_diag),
-             "prev %s stage=%d.%d ran=%lds draw=%dms heap=%d launch=%lu",
+             "prev %s stage=%d.%d ran=%lds draw=%dms heap=%d launch=%lu%s",
              prev.clean_exit ? "clean" : "UNCLEAN", prev.stage, prev.detail,
              (long)(prev.updated - prev.started), prev.max_draw_ms, prev.heap_free,
-             (unsigned long)prev.launches);
+             (unsigned long)prev.launches, blocked ? " ALERTS-BLOCKED" : "");
     s_prev_diag_pending = true;
     APP_LOG(APP_LOG_LEVEL_INFO, "%s", s_prev_diag);
   }
@@ -514,8 +597,89 @@ static void prv_diag_init(void) {
     .launches = launches + 1,
     .started = (uint32_t)time(NULL),
     .version = DIAG_VERSION,
+    .alerts_blocked = blocked,
   };
   prv_breadcrumb(STAGE_INIT, 0);
+}
+
+// Rebuilds what each row shows and picks the row font, if anything changed.
+static void prv_update_layout(int width) {
+  if (!s_layout_stale && s_row_font) {
+    return;
+  }
+  time_t now = time(NULL);
+  for (int section = 0; section < NUM_SECTIONS; section++) {
+    s_counts[section] = prv_build_cells(section, now, s_cells[section]);
+    // The header counts down to the next train that is actually running.
+    s_wait[section][0] = '\0';
+    for (int i = 0; i < s_counts[section]; i++) {
+      if (s_cells[section][i].flag != FLAG_CANCELLED) {
+        prv_format_wait(s_cells[section][i].departure, now, s_wait[section],
+                        sizeof(s_wait[section]));
+        break;
+      }
+    }
+  }
+  s_row_font = prv_pick_row_font(s_cells, s_counts, width);
+  s_layout_stale = false;
+}
+
+// Redraws after a change to what the rows show.
+static void prv_content_changed(void) {
+  s_layout_stale = true;
+  if (s_canvas) {
+    layer_mark_dirty(s_canvas);
+  }
+}
+
+static void prv_scroll_timer_cb(void *context) {
+  s_scroll_timer = NULL;
+  layer_mark_dirty(s_canvas);
+}
+
+// Called at the end of every redraw. While a pass is running it leaves a
+// breadcrumb every couple of seconds and schedules the next frame only after
+// an idle gap, so the watch is never drawing back to back.
+static void prv_scroll_after_draw(int width, int64_t now_ms) {
+  if (!s_scroll_start_ms) {
+    return;
+  }
+  s_scroll_frames++;
+  bool running = false;
+  for (int section = 0; section < NUM_SECTIONS; section++) {
+    running |= prv_alert_scrolling(section, width, now_ms);
+  }
+  if (!running) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "scroll done frames=%d draw=%dms", s_scroll_frames,
+            s_max_draw_ms);
+    s_scroll_start_ms = 0;
+    prv_breadcrumb(STAGE_RUNNING, 0);
+  } else if (now_ms - s_scroll_breadcrumb_ms >= SCROLL_BREADCRUMB_MS) {
+    s_scroll_breadcrumb_ms = now_ms;
+    int px = prv_scroll_px(now_ms) / 8;
+    prv_breadcrumb(STAGE_SCROLL, px > 255 ? 255 : (uint8_t)px);
+  }
+  // One more frame after the pass ends brings the label back.
+  if (!s_scroll_timer) {
+    s_scroll_timer = app_timer_register(SCROLL_IDLE_MS, prv_scroll_timer_cb, NULL);
+  }
+}
+
+// Starts a scroll pass if there is an alert and none is running.
+static void prv_start_scroll(void) {
+  if (s_scroll_start_ms || s_diag.alerts_blocked) {
+    return;
+  }
+  for (int section = 0; section < NUM_SECTIONS; section++) {
+    if (s_alerts[section][0]) {
+      s_scroll_start_ms = prv_now_ms();
+      s_scroll_breadcrumb_ms = s_scroll_start_ms;
+      s_scroll_frames = 0;
+      prv_breadcrumb(STAGE_SCROLL, 0);
+      layer_mark_dirty(s_canvas);
+      return;
+    }
+  }
 }
 
 static void prv_canvas_draw(Layer *layer, GContext *ctx);
@@ -524,25 +688,22 @@ static void prv_canvas_draw(Layer *layer, GContext *ctx);
 static void prv_canvas_update(Layer *layer, GContext *ctx) {
   int64_t start_ms = prv_now_ms();
   prv_canvas_draw(layer, ctx);
-  uint16_t took = prv_cap16((int32_t)(prv_now_ms() - start_ms));
+  int64_t end_ms = prv_now_ms();
+  uint16_t took = prv_cap16((int32_t)(end_ms - start_ms));
   if (took > s_max_draw_ms) {
     s_max_draw_ms = took;
   }
+  prv_scroll_after_draw(layer_get_bounds(layer).size.w, end_ms);
 }
 
 static void prv_canvas_draw(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   int width = bounds.size.w;
-  time_t now = time(NULL);
   int64_t now_ms = prv_now_ms();
-
-  // Static: the app stack is only about 2KB, and the text drawing below needs most of it.
-  static Cell cells[NUM_SECTIONS][MAX_DEPARTURES];
-  static int counts[NUM_SECTIONS];
-  for (int section = 0; section < NUM_SECTIONS; section++) {
-    counts[section] = prv_build_cells(section, now, cells[section]);
-  }
-  const RowFont *rf = prv_pick_row_font(cells, counts, width);
+  // The cells are static: the app stack is only about 2KB, and the text
+  // drawing below needs most of it.
+  prv_update_layout(width);
+  const RowFont *rf = s_row_font;
 
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
@@ -586,17 +747,9 @@ static void prv_canvas_draw(Layer *layer, GContext *ctx) {
 
   for (int section = 0; section < NUM_SECTIONS; section++) {
     int y = sections_top + section * section_h;
-    char right[16] = "";
-    // The header counts down to the next train that is actually running.
-    for (int i = 0; i < counts[section]; i++) {
-      if (cells[section][i].flag != FLAG_CANCELLED) {
-        prv_format_wait(cells[section][i].departure, now, right, sizeof(right));
-        break;
-      }
-    }
-    prv_draw_header(ctx, y, width, s_settings.labels[section], right);
-    prv_draw_row(ctx, y + HEADER_HEIGHT, width, section, cells[section], counts[section], rf,
-                 now_ms);
+    prv_draw_header(ctx, y, width, section, s_wait[section], now_ms);
+    prv_draw_row(ctx, y + HEADER_HEIGHT, width, section, s_cells[section], s_counts[section],
+                 rf, now_ms);
   }
 }
 
@@ -748,6 +901,12 @@ static bool prv_read_settings(DictionaryIterator *iter) {
     changed = true;
   }
   if (changed) {
+    // Saving the settings is how the user turns alerts back on after a block.
+    if (s_diag.alerts_blocked) {
+      s_diag.alerts_blocked = 0;
+      prv_breadcrumb(s_diag.stage, s_diag.detail);
+      APP_LOG(APP_LOG_LEVEL_INFO, "alerts unblocked");
+    }
     persist_write_data(PERSIST_KEY_SETTINGS, &s_settings, sizeof(s_settings));
   }
   return changed;
@@ -817,6 +976,7 @@ static void prv_send_prev_diag(void) {
 
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   bool changed = false;
+  bool alert_changed = false;
   for (int section = 0; section < NUM_SECTIONS; section++) {
     Tuple *t;
     bool got_times = false;
@@ -849,6 +1009,24 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
       flags[NUM_TIMES] = '\0';
       changed = true;
     }
+    if ((t = dict_find(iter, MESSAGE_KEY_ALERT + section)) && t->type == TUPLE_CSTRING &&
+        strncmp(s_alerts[section], t->value->cstring, ALERT_SIZE - 1) != 0) {
+      strncpy(s_alerts[section], t->value->cstring, ALERT_SIZE - 1);
+      s_alerts[section][ALERT_SIZE - 1] = '\0';
+      s_alert_w[section] = 0;
+      for (int i = 0; s_alerts[section][i]; i++) {
+        char ch[2] = { s_alerts[section][i], '\0' };
+        // A lone space measures as empty, so measure it between two letters.
+        int w = ch[0] == ' ' ? prv_text_width("n n", s_header_font) -
+                               prv_text_width("nn", s_header_font)
+                             : prv_text_width(ch, s_header_font);
+        s_alert_cw[section][i] = (uint8_t)w;
+        s_alert_w[section] += w;
+      }
+      APP_LOG(APP_LOG_LEVEL_INFO, "alert row=%d len=%d w=%d blocked=%d", section,
+              (int)strlen(s_alerts[section]), s_alert_w[section], s_diag.alerts_blocked);
+      alert_changed = true;
+    }
     if ((t = dict_find(iter, MESSAGE_KEY_MODE + section))) {
       s_data.mode[section] = prv_tuple_int(t) == MODE_MINUTES ? MODE_MINUTES : MODE_CLOCK;
       changed = true;
@@ -870,23 +1048,30 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   prv_send_prev_diag();
 
   bool settings_changed = prv_read_settings(iter);
-  if (changed || settings_changed) {
-    layer_mark_dirty(s_canvas);
+  if (changed || settings_changed || alert_changed) {
+    prv_content_changed();
     prv_update_blink();
+  }
+  if (alert_changed) {
+    // A changed alert restarts the pass from the beginning.
+    s_scroll_start_ms = 0;
+    prv_start_scroll();
   }
 }
 
 static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   prv_update_time_string(tick_time);
-  layer_mark_dirty(s_canvas);
+  prv_content_changed();
   prv_update_blink();
+  prv_start_scroll();
   // The handler also runs whenever the phone sets the watch's clock, so the
   // time since the last request is checked too.
   time_t now = time(NULL);
   APP_LOG(APP_LOG_LEVEL_INFO, "hb up=%lds heap=%d draw=%dms fetch=%d bt=%d",
           (long)(now - (time_t)s_diag.started), (int)heap_bytes_free(), s_max_draw_ms,
           (int)s_fetch_state, (int)s_connected);
-  if (s_diag.stage == STAGE_INIT || tick_time->tm_min % DIAG_PERSIST_MINUTES == 0) {
+  if (s_diag.stage == STAGE_INIT ||
+      (s_diag.stage == STAGE_RUNNING && tick_time->tm_min % DIAG_PERSIST_MINUTES == 0)) {
     prv_breadcrumb(STAGE_RUNNING, 0);
   }
   s_max_draw_ms = 0;
@@ -959,7 +1144,8 @@ static void prv_init(void) {
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_outbox_failed(prv_outbox_failed);
   app_message_register_outbox_sent(prv_outbox_sent);
-  app_message_open(512, 128);
+  // Three full-length alerts on top of the departures need about 900 bytes.
+  app_message_open(1200, 128);
 
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
   connection_service_subscribe((ConnectionHandlers) {
@@ -978,6 +1164,9 @@ static void prv_deinit(void) {
   }
   if (s_fetch_timer) {
     app_timer_cancel(s_fetch_timer);
+  }
+  if (s_scroll_timer) {
+    app_timer_cancel(s_scroll_timer);
   }
   tick_timer_service_unsubscribe();
   connection_service_unsubscribe();

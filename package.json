@@ -39,7 +39,9 @@
       "DEPARTURES",
       "FETCH_FAILED",
       "FLAGS[3]",
-      "DIAG"
+      "DIAG",
+      "ALERT_ON[3]",
+      "ALERT[3]"
     ],
     "resources": {
       "media": []

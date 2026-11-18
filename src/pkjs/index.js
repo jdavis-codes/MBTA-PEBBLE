@@ -25,6 +25,10 @@ var FLAG_CANCELLED = 'X';
 var FLAG_DELAYED = 'D';
 // A commuter rail train predicted this much after its scheduled time is shown as delayed.
 var DELAY_SEC = 3 * 60;
+// Alerts below this MBTA severity (0-10) are notices such as parking or stairs.
+var ALERT_MIN_SEVERITY = 3;
+// Must match ALERT_SIZE - 1 in src/c/watchface.c.
+var ALERT_MAX_CHARS = 160;
 
 // A fetch still unfinished after this long is treated as hung and abandoned.
 // The iOS Pebble app has no XMLHttpRequest timeout and suspends timers in the
@@ -177,13 +181,15 @@ function rowConfig(row, saved) {
     var v = saved[key + '[' + row + ']'];
     return v === undefined || v === null || v === '' ? fallback : String(v);
   }
+  var alerts = saved['ALERT_ON[' + row + ']'];
   var dir = pick('DIR', defaults.direction.value);
   var colon = dir.indexOf(':');
   return {
     route: pick('ROUTE', defaults.route.value),
     stop: pick('STOP', defaults.stop.value),
     direction: colon < 0 ? dir : dir.substring(0, colon),
-    destination: colon < 0 ? null : dir.substring(colon + 1)
+    destination: colon < 0 ? null : dir.substring(colon + 1),
+    alerts: alerts === true || alerts === 1 || alerts === '1' || alerts === 'true'
   };
 }
 
@@ -349,6 +355,52 @@ function fetchPredictions(row, showBranches, callback) {
   });
 }
 
+// The watch fonts are only relied on for ASCII, and it measures text in bytes.
+function alertText(header) {
+  var text = String(header || '')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^ | $/g, '');
+  if (text.length > ALERT_MAX_CHARS) {
+    text = text.slice(0, ALERT_MAX_CHARS - 3) + '...';
+  }
+  return text;
+}
+
+// Whether an alert applies to this row's line, station and direction. An
+// alert that names no station or direction covers all of them.
+function alertApplies(alert, row) {
+  // A merged Green Line row lists several route ids.
+  var routes = row.route.split(',');
+  return (alert.attributes.informed_entity || []).some(function(e) {
+    return routes.indexOf(e.route) >= 0 &&
+           (!e.stop || e.stop === row.stop) &&
+           (e.direction_id === null || e.direction_id === undefined ||
+            String(e.direction_id) === row.direction);
+  });
+}
+
+// The most severe alert in effect now for the row, as text ('' if none).
+function fetchAlert(row, callback) {
+  apiGet('/alerts', {
+    'filter[route]': row.route,
+    'filter[datetime]': 'NOW',
+    'fields[alert]': 'header,severity,informed_entity'
+  }, function(err, json) {
+    if (err) return callback(err);
+    var best = null;
+    json.data.forEach(function(alert) {
+      var severity = alert.attributes.severity || 0;
+      if (severity < ALERT_MIN_SEVERITY || !alertApplies(alert, row)) return;
+      if (!best || severity > best.attributes.severity) best = alert;
+    });
+    callback(null, best ? alertText(best.attributes.header) : '');
+  });
+}
+
 function putRow(dict, row, result) {
   var dest = '';
   var flags = '';
@@ -422,7 +474,12 @@ function refresh() {
 
   var saved = savedSettings();
   var dict = {};
+  var rows = [];
   var pending = NUM_ROWS;
+  for (var i = 0; i < NUM_ROWS; i++) {
+    rows.push(rowConfig(i, saved));
+    if (rows[i].alerts) pending++;
+  }
   var failed = 0;
   function done() {
     if (--pending > 0) return;
@@ -436,7 +493,22 @@ function refresh() {
 
   for (var r = 0; r < NUM_ROWS; r++) {
     (function(row) {
-      var cfg = rowConfig(row, saved);
+      var cfg = rows[row];
+      if (cfg.alerts) {
+        fetchAlert(cfg, function(err, text) {
+          if (fetchId !== s_fetch_id) return;
+          // On failure the key is left out so the watch keeps the alert it has.
+          if (err) {
+            console.log('Row ' + (row + 1) + ' alerts fetch failed: ' + err.message);
+          } else if (sameRow(cfg, rowConfig(row, savedSettings()))) {
+            dict[keys.ALERT + row] = text;
+            if (text) console.log('Row ' + (row + 1) + ' alert: ' + text);
+          }
+          done();
+        });
+      } else {
+        dict[keys.ALERT + row] = '';
+      }
       var fetch = isCommuterRail(cfg.route) ? fetchCommuterRail : fetchSubway;
       fetch(cfg, function(err, result) {
         // A late reply from an abandoned fetch must not disturb its replacement.
@@ -474,6 +546,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
     delete settings[keys.ROUTE + row];
     delete settings[keys.STOP + row];
     delete settings[keys.DIR + row];
+    delete settings[keys.ALERT_ON + row];
     if (!sameRow(rowConfig(row, before), rowConfig(row, after))) {
       putRow(cleared, row, { mode: MODE_MINUTES, trains: [] });
     }
@@ -533,5 +606,8 @@ Pebble.addEventListener('appmessage', function(e) {
 
 // Exposed for tests.
 if (typeof module !== 'undefined') {
-  module.exports = { serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours };
+  module.exports = {
+    serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
+    alertText: alertText, alertApplies: alertApplies
+  };
 }
