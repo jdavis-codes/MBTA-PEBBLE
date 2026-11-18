@@ -819,11 +819,19 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   bool changed = false;
   for (int section = 0; section < NUM_SECTIONS; section++) {
     Tuple *t;
+    bool got_times = false;
     for (int i = 0; i < NUM_TIMES; i++) {
       if ((t = dict_find(iter, MESSAGE_KEY_TIMES + section * NUM_TIMES + i))) {
         s_data.times[section][i] = prv_tuple_int(t);
+        got_times = true;
         changed = true;
       }
+    }
+    // Branch letters belong to the times they arrived with; new times without
+    // letters mean the row has none.
+    if (got_times) {
+      memset(s_data.dest[section], ' ', NUM_TIMES);
+      s_data.dest[section][NUM_TIMES] = '\0';
     }
     if ((t = dict_find(iter, MESSAGE_KEY_DEST + section)) && t->type == TUPLE_CSTRING) {
       char *dest = s_data.dest[section];

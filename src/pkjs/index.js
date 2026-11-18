@@ -142,25 +142,48 @@ function isCancelled(attrs) {
                    attrs.schedule_relationship === 'SKIPPED');
 }
 
+// Rewrites the saved settings with remove + set. The emulator's localStorage
+// (Python dbm.dumb) can keep the old length when a shorter value overwrites a
+// longer one, leaving junk after the JSON; a remove rewrites its index.
+function storeSettings(json) {
+  localStorage.removeItem('clay-settings');
+  localStorage.setItem('clay-settings', json);
+}
+
 function savedSettings() {
+  var raw = localStorage.getItem('clay-settings');
+  if (!raw) return {};
   try {
-    return JSON.parse(localStorage.getItem('clay-settings')) || {};
+    return JSON.parse(raw) || {};
   } catch (e) {
+    // Recover the settings object from before any trailing junk.
+    for (var end = raw.lastIndexOf('}'); end > 0; end = raw.lastIndexOf('}', end - 1)) {
+      try {
+        var json = raw.slice(0, end + 1);
+        var settings = JSON.parse(json);
+        storeSettings(json);
+        return settings;
+      } catch (e2) {}
+    }
     return {};
   }
 }
 
 // The line, station and direction chosen for a row, falling back to the defaults.
+// A direction of "0:<name>" is outbound limited to trains headed for that endpoint.
 function rowConfig(row, saved) {
   var defaults = config.ROWS[row];
   function pick(key, fallback) {
     var v = saved[key + '[' + row + ']'];
     return v === undefined || v === null || v === '' ? fallback : String(v);
   }
+  var dir = pick('DIR', defaults.direction.value);
+  var colon = dir.indexOf(':');
   return {
     route: pick('ROUTE', defaults.route.value),
     stop: pick('STOP', defaults.stop.value),
-    direction: pick('DIR', defaults.direction.value)
+    direction: colon < 0 ? dir : dir.substring(0, colon),
+    destination: colon < 0 ? null : dir.substring(colon + 1)
   };
 }
 
@@ -168,12 +191,20 @@ function isCommuterRail(route) {
   return route.indexOf('CR-') === 0;
 }
 
+// Some trains stop at an endpoint without ending there, so they count toward it too.
+// Wickford Junction trains stop at Providence; Foxboro shuttles are headed to Foxboro.
+var SERVED_HEADSIGNS = {
+  'Providence': ['Providence', 'Wickford Junction'],
+  'Foxboro': ['Foxboro', 'Foxboro (Shuttle)']
+};
+
 // Commuter rail: scheduled departures, overridden by live predictions when
 // available, with cancelled and delayed trains flagged.
 function fetchCommuterRail(row, callback) {
   var nowMs = Date.now();
   var nowSec = Math.floor(nowMs / 1000);
   var windows = serviceWindows(nowMs);
+  var served = row.destination ? (SERVED_HEADSIGNS[row.destination] || [row.destination]) : null;
   var trains = [];
   var pending = windows.length;
   var failed = null;
@@ -184,11 +215,13 @@ function fetchCommuterRail(row, callback) {
       'filter[direction_id]': row.direction,
       'filter[date]': win.date,
       'filter[min_time]': win.minTime,
-      'include': 'prediction',
+      'include': 'prediction,trip',
       'sort': 'departure_time',
-      'page[limit]': 20,
+      // A single-endpoint filter drops some schedules, so ask for more to fill the row.
+      'page[limit]': row.destination ? 40 : 20,
       'fields[schedule]': 'departure_time,arrival_time',
-      'fields[prediction]': 'departure_time,arrival_time,schedule_relationship'
+      'fields[prediction]': 'departure_time,arrival_time,schedule_relationship',
+      'fields[trip]': 'headsign'
     }, function(err, json) {
       if (err) {
         failed = err;
@@ -196,8 +229,13 @@ function fetchCommuterRail(row, callback) {
         var included = indexIncluded(json);
         json.data.forEach(function(sched) {
           var a = sched.attributes;
-          var rel = sched.relationships && sched.relationships.prediction;
-          var pred = rel && rel.data ? included['prediction:' + rel.data.id] : null;
+          var rel = sched.relationships || {};
+          if (served) {
+            var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
+            if (!trip || served.indexOf(trip.attributes.headsign) < 0) return;
+          }
+          var pred = rel.prediction && rel.prediction.data
+            ? included['prediction:' + rel.prediction.data.id] : null;
           var p = pred ? pred.attributes : null;
           var scheduled = parseIso(a.departure_time || a.arrival_time);
           var predicted = p ? parseIso(p.departure_time || p.arrival_time) : 0;
@@ -217,10 +255,65 @@ function fetchCommuterRail(row, callback) {
   });
 }
 
-// Subway and light rail: live predictions. When trains in this direction go to
-// different places (e.g. Ashmont vs Braintree), each is tagged with the first
-// letter of its destination.
+var NO_BRANCH = ' ';
+// Red Line southbound trains split at JFK/UMass.
+var RED_BRANCHES = { Ashmont: 'A', Braintree: 'B' };
+var RED_SOUTHBOUND = '0';
+// Stops past the split, where only one Red Line branch runs.
+var RED_SINGLE_BRANCH_STOPS = [
+  'place-shmnl', 'place-fldcr', 'place-smmnl', 'place-asmnl',
+  'place-nqncy', 'place-wlsta', 'place-qnctr', 'place-qamnl', 'place-brntn'
+];
+// Which of a merged Green Line row's branches serve its stop, keyed by "routes|stop".
+var s_greenBranchCount = {};
+
+function isMergedGreen(route) {
+  return /^Green-[A-Z](,Green-[A-Z])+$/.test(route);
+}
+
+// The branch letter for one departure: "Green-D" -> "D", Red Line "Ashmont" -> "A".
+// Departures without a branch (e.g. a short-turn to JFK/UMass) get NO_BRANCH.
+function branchLetter(routeId, headsign) {
+  var green = /^Green-([A-Z])$/.exec(routeId);
+  if (green) return green[1];
+  if (routeId === 'Red') return RED_BRANCHES[headsign] || NO_BRANCH;
+  return NO_BRANCH;
+}
+
+// Calls back with whether a row's departures can be on more than one branch,
+// so letters are shown even when the next few trains happen to share a branch.
+function rowHasBranches(row, callback) {
+  if (row.route === 'Red') {
+    return callback(row.direction === RED_SOUTHBOUND &&
+                    RED_SINGLE_BRANCH_STOPS.indexOf(row.stop) < 0);
+  }
+  if (!isMergedGreen(row.route)) return callback(false);
+  var cacheKey = row.route + '|' + row.stop;
+  if (s_greenBranchCount[cacheKey] !== undefined) {
+    return callback(s_greenBranchCount[cacheKey] > 1);
+  }
+  apiGet('/routes', {
+    'filter[stop]': row.stop,
+    'filter[type]': '0',
+    'fields[route]': 'short_name'
+  }, function(err, json) {
+    if (err) return callback(true);
+    var branches = row.route.split(',');
+    var count = json.data.filter(function(r) { return branches.indexOf(r.id) >= 0; }).length;
+    s_greenBranchCount[cacheKey] = count;
+    callback(count > 1);
+  });
+}
+
+// Subway and light rail: live predictions, each tagged with its branch letter
+// when the row's line branches at or beyond its stop.
 function fetchSubway(row, callback) {
+  rowHasBranches(row, function(showBranches) {
+    fetchPredictions(row, showBranches, callback);
+  });
+}
+
+function fetchPredictions(row, showBranches, callback) {
   apiGet('/predictions', {
     'filter[stop]': row.stop,
     'filter[route]': row.route,
@@ -235,7 +328,6 @@ function fetchSubway(row, callback) {
     var included = indexIncluded(json);
     var nowSec = Math.floor(Date.now() / 1000);
     var trains = [];
-    var headsigns = {};
     json.data.forEach(function(pred) {
       var a = pred.attributes;
       if (isCancelled(a)) return;
@@ -243,18 +335,17 @@ function fetchSubway(row, callback) {
       if (!a.departure_time) return;
       var t = parseIso(a.departure_time);
       if (t <= nowSec) return;
-      var tripRel = pred.relationships && pred.relationships.trip;
-      var trip = tripRel && tripRel.data ? included['trip:' + tripRel.data.id] : null;
-      var headsign = trip && trip.attributes.headsign ? trip.attributes.headsign : '';
-      headsigns[headsign] = true;
-      trains.push({ time: t, dest: headsign ? headsign.charAt(0).toUpperCase() : ' ' });
+      var dest = NO_BRANCH;
+      if (showBranches) {
+        var rel = pred.relationships || {};
+        var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
+        dest = branchLetter(rel.route && rel.route.data ? rel.route.data.id : '',
+                            trip ? trip.attributes.headsign : '');
+      }
+      trains.push({ time: t, dest: dest });
     });
     trains.sort(function(x, y) { return x.time - y.time; });
-    trains = trains.slice(0, MAX_TIMES);
-    if (Object.keys(headsigns).length < 2) {
-      trains.forEach(function(t) { t.dest = ' '; });
-    }
-    callback(null, { mode: MODE_MINUTES, trains: trains });
+    callback(null, { mode: MODE_MINUTES, trains: trains.slice(0, MAX_TIMES) });
   });
 }
 
@@ -264,7 +355,7 @@ function putRow(dict, row, result) {
   for (var i = 0; i < MAX_TIMES; i++) {
     var train = result.trains[i];
     dict[keys.TIMES + row * MAX_TIMES + i] = train ? train.time : 0;
-    dest += train ? train.dest : ' ';
+    dest += train ? train.dest : NO_BRANCH;
     flags += train && train.flag ? train.flag : FLAG_NONE;
   }
   dict[keys.DEST + row] = dest;
@@ -272,14 +363,41 @@ function putRow(dict, row, result) {
   dict[keys.MODE + row] = result.mode;
 }
 
+function sameRow(a, b) {
+  return a.route === b.route && a.stop === b.stop && a.direction === b.direction &&
+         a.destination === b.destination;
+}
+
+// Messages go out one at a time, in order, so a cleared row can't overtake newer data.
+var s_outbox = [];
+var s_sending = false;
+
 function sendToWatch(dict, retries, what) {
-  what = what || 'transit data';
-  Pebble.sendAppMessage(dict, function() {
-    console.log('Sent ' + what + ' to watch');
+  s_outbox.push({ dict: dict, retries: retries, what: what || 'transit data' });
+  pumpOutbox();
+}
+
+function pumpOutbox() {
+  if (s_sending || s_outbox.length === 0) return;
+  s_sending = true;
+  var msg = s_outbox[0];
+  function next() {
+    s_outbox.shift();
+    s_sending = false;
+    pumpOutbox();
+  }
+  Pebble.sendAppMessage(msg.dict, function() {
+    console.log('Sent ' + msg.what + ' to watch');
+    next();
   }, function(e) {
-    console.log('Failed to send ' + what + ': ' + JSON.stringify(e));
-    if (retries > 0) {
-      setTimeout(function() { sendToWatch(dict, retries - 1, what); }, 2000);
+    console.log('Failed to send ' + msg.what + ': ' + JSON.stringify(e));
+    if (msg.retries-- > 0) {
+      setTimeout(function() {
+        s_sending = false;
+        pumpOutbox();
+      }, 2000);
+    } else {
+      next();
     }
   });
 }
@@ -327,7 +445,7 @@ function refresh() {
           console.log('Row ' + (row + 1) + ' (' + cfg.route + ' ' + cfg.stop + ') fetch failed: ' +
                       err.message);
           failed++;
-        } else {
+        } else if (sameRow(cfg, rowConfig(row, savedSettings()))) {
           putRow(dict, row, result);
         }
         done();
@@ -344,14 +462,26 @@ Pebble.addEventListener('showConfiguration', function() {
 
 Pebble.addEventListener('webviewclosed', function(e) {
   if (!e || !e.response) return;
+  var before = savedSettings();
   var settings = clay.getSettings(e.response);
+  storeSettings(localStorage.getItem('clay-settings'));
+  var after = savedSettings();
+  // Rows now pointing somewhere else are blanked until their new data arrives,
+  // so the old line's times and branch letters never linger.
+  var cleared = {};
   // The watch only needs the labels; the phone uses the stations to fetch.
   for (var row = 0; row < NUM_ROWS; row++) {
     delete settings[keys.ROUTE + row];
     delete settings[keys.STOP + row];
     delete settings[keys.DIR + row];
+    if (!sameRow(rowConfig(row, before), rowConfig(row, after))) {
+      putRow(cleared, row, { mode: MODE_MINUTES, trains: [] });
+    }
   }
   sendToWatch(settings, 3, 'settings');
+  if (Object.keys(cleared).length > 0) {
+    sendToWatch(cleared, 3, 'cleared rows');
+  }
   refresh();
 });
 

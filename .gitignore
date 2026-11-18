@@ -1,4 +1,5 @@
 /.DS_Store
 /.cursor
 /build
-/.lock-waf_linux_build
+/.lock-waf*
+cat.svg
