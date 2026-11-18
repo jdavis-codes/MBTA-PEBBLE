@@ -20,8 +20,15 @@ var NUM_ROWS = config.ROWS.length;
 var MODE_CLOCK = 0;
 var MODE_MINUTES = 1;
 
+// A fetch still unfinished after this long is treated as hung and abandoned.
+// The iOS Pebble app has no XMLHttpRequest timeout and suspends timers in the
+// background, so this is checked against the clock on the next request.
+var FETCH_HUNG_MS = 30 * 1000;
+
 var s_fetching = false;
 var s_refetch = false;
+var s_fetch_started = 0;
+var s_fetch_id = 0;
 
 function pad2(n) {
   return (n < 10 ? '0' : '') + n;
@@ -232,11 +239,16 @@ function sendToWatch(dict, retries, what) {
 
 function refresh() {
   if (s_fetching) {
-    s_refetch = true;
-    return;
+    if (Date.now() - s_fetch_started < FETCH_HUNG_MS) {
+      s_refetch = true;
+      return;
+    }
+    console.log('Abandoning hung fetch');
   }
   s_fetching = true;
   s_refetch = false;
+  s_fetch_started = Date.now();
+  var fetchId = ++s_fetch_id;
 
   var saved = savedSettings();
   var dict = {};
@@ -256,6 +268,8 @@ function refresh() {
       var cfg = rowConfig(row, saved);
       var fetch = isCommuterRail(cfg.route) ? fetchCommuterRail : fetchSubway;
       fetch(cfg, function(err, result) {
+        // A late reply from an abandoned fetch must not disturb its replacement.
+        if (fetchId !== s_fetch_id) return;
         if (err) {
           console.log('Row ' + (row + 1) + ' (' + cfg.route + ' ' + cfg.stop + ') fetch failed: ' +
                       err.message);
