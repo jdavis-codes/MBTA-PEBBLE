@@ -65,6 +65,17 @@ typedef struct {
 #define NUM_BIKES 5
 #define BIKE_LEVELS 8
 #define BIKE_NONE '-'
+// Up to this many e-bikes are shown as dots around a pie.
+#define BIKE_MAX_EBIKES 8
+// Centre of the first pie, and the gap between pies; the orbiting dots reach
+// 6px out, so the row occupies y 0..INDICATOR_BOTTOM - 1.
+#define BIKE_LEFT 6
+#define BIKE_Y 6
+#define BIKE_SPACING 13
+#define INDICATOR_BOTTOM 13
+// Where the digits sit inside the clock's text box.
+#define TIME_GLYPH_TOP 11
+#define TIME_GLYPH_HEIGHT 25
 // What the REQUEST message asks the phone for; must match src/pkjs/index.js.
 #define REQUEST_ALL 1
 #define REQUEST_BIKES 2
@@ -158,10 +169,10 @@ static FetchState s_fetch_state;
 static AppTimer *s_fetch_timer;
 static int s_fetch_ticks;
 static time_t s_last_request;
-// One character per dock: BIKE_NONE when the slot is unused, otherwise a letter
-// whose position in the alphabet is the fill level 0..BIKE_LEVELS, in upper
-// case when an e-bike is available.
-static char s_bikes[NUM_BIKES + 1] = "-----";
+// Two characters per dock: the fill level as a letter from 'a' (0) to
+// 'a' + BIKE_LEVELS, or BIKE_NONE when the slot is unused, then the number of
+// e-bikes as a digit.
+static char s_bikes[2 * NUM_BIKES + 1] = "-0-0-0-0-0";
 static Diag s_diag;
 // The previous run's breadcrumb as text, until the phone has received it.
 static char s_prev_diag[96];
@@ -711,19 +722,21 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
 }
 
 // Draws the dock pies. Each keeps its slot's position so docks are recognised
-// by where they sit.
+// by where they sit. One dot per available e-bike orbits the pie, starting at
+// 12 o'clock and going clockwise.
 static void prv_draw_bikes(GContext *ctx) {
+  static const GPoint s_orbit[BIKE_MAX_EBIKES] = {
+    { 0, -5 }, { 4, -4 }, { 5, 0 }, { 4, 4 }, { 0, 5 }, { -4, 4 }, { -5, 0 }, { -4, -4 },
+  };
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_context_set_stroke_color(ctx, GColorWhite);
   for (int i = 0; i < NUM_BIKES; i++) {
-    char c = s_bikes[i];
-    bool ebike = c >= 'A' && c <= 'A' + BIKE_LEVELS;
-    int level = ebike ? c - 'A' : c - 'a';
+    int level = s_bikes[2 * i] - 'a';
+    int ebikes = s_bikes[2 * i + 1] - '0';
     if (level < 0 || level > BIKE_LEVELS) {
       continue;
     }
-    GPoint centre = GPoint(BT_DOT_MARGIN + BT_DOT_RADIUS + i * FETCH_DOT_SPACING,
-                           BT_DOT_MARGIN + BT_DOT_RADIUS);
+    GPoint centre = GPoint(BIKE_LEFT + i * BIKE_SPACING, BIKE_Y);
     graphics_draw_circle(ctx, centre, BT_DOT_RADIUS);
     if (level == BIKE_LEVELS) {
       graphics_fill_circle(ctx, centre, BT_DOT_RADIUS);
@@ -734,10 +747,11 @@ static void prv_draw_bikes(GContext *ctx) {
       graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, BT_DOT_RADIUS + 1, 0,
                            TRIG_MAX_ANGLE * level / BIKE_LEVELS);
     }
-    if (ebike) {
-      // A small satellite at the upper right.
-      graphics_fill_rect(ctx, GRect(centre.x + BT_DOT_RADIUS + 1, centre.y - BT_DOT_RADIUS - 2, 2, 2),
-                         0, GCornerNone);
+    for (int e = 0; e < ebikes && e < BIKE_MAX_EBIKES; e++) {
+      // A 2x2 dot that grows away from the pie.
+      GPoint o = s_orbit[e];
+      graphics_fill_rect(ctx, GRect(centre.x + o.x - (o.x < 0 ? 1 : 0),
+                                    centre.y + o.y - (o.y < 0 ? 1 : 0), 2, 2), 0, GCornerNone);
     }
   }
 }
@@ -758,8 +772,10 @@ static void prv_canvas_draw(Layer *layer, GContext *ctx) {
   int section_h = HEADER_HEIGHT + rf->spec->row_h;
   int sections_top = bounds.size.h - NUM_SECTIONS * section_h;
   graphics_context_set_text_color(ctx, GColorWhite);
+  // The digits are centred between the indicator row and the sections.
+  int digits_top = INDICATOR_BOTTOM + (sections_top - INDICATOR_BOTTOM - TIME_GLYPH_HEIGHT) / 2;
   prv_draw_text(ctx, s_time_buffer, s_time_font,
-                GRect(0, (sections_top - TIME_HEIGHT) / 2, width, TIME_HEIGHT),
+                GRect(0, digits_top - TIME_GLYPH_TOP, width, TIME_HEIGHT),
                 GTextAlignmentCenter);
 
   GPoint dot = GPoint(width - BT_DOT_MARGIN - BT_DOT_RADIUS - 1, BT_DOT_MARGIN + BT_DOT_RADIUS);
@@ -1004,7 +1020,7 @@ static void prv_request_update(uint8_t what) {
 
 static bool prv_has_bikes(void) {
   for (int i = 0; i < NUM_BIKES; i++) {
-    if (s_bikes[i] != BIKE_NONE) {
+    if (s_bikes[2 * i] != BIKE_NONE) {
       return true;
     }
   }
@@ -1102,10 +1118,9 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
 
   Tuple *bikes = dict_find(iter, MESSAGE_KEY_BIKES);
   if (bikes && bikes->type == TUPLE_CSTRING &&
-      strncmp(s_bikes, bikes->value->cstring, NUM_BIKES) != 0) {
-    memset(s_bikes, BIKE_NONE, NUM_BIKES);
-    size_t len = strlen(bikes->value->cstring);
-    memcpy(s_bikes, bikes->value->cstring, len < NUM_BIKES ? len : NUM_BIKES);
+      strlen(bikes->value->cstring) == 2 * NUM_BIKES &&
+      strncmp(s_bikes, bikes->value->cstring, 2 * NUM_BIKES) != 0) {
+    memcpy(s_bikes, bikes->value->cstring, 2 * NUM_BIKES);
     layer_mark_dirty(s_canvas);
   }
 

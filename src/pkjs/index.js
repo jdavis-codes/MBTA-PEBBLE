@@ -37,6 +37,8 @@ var BIKE_STATUS_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json
 var NUM_BIKES = 5;
 var BIKE_LEVELS = 8;
 var BIKE_NONE = '-';
+// Must match BIKE_MAX_EBIKES in src/c/watchface.c.
+var BIKE_MAX_EBIKES = 8;
 // What the watch's REQUEST message asks for; must match src/c/watchface.c.
 var REQUEST_BIKES = 2;
 
@@ -448,10 +450,11 @@ function hasBikes(ids) {
   return ids.some(function(id) { return id; });
 }
 
-// One dock as the watch's status letter: how many eighths of the dock's spaces
-// hold a rentable bike, in upper case when one of them is an e-bike.
+// One dock as the watch's two status characters: a letter for how many eighths
+// of the dock's spaces hold a rentable bike, then a digit for how many of
+// those are e-bikes (at most BIKE_MAX_EBIKES).
 function bikeLetter(station) {
-  if (!station || !station.is_installed || !station.is_renting) return 'a';
+  if (!station || !station.is_installed || !station.is_renting) return 'a0';
   var bikes = station.num_bikes_available || 0;
   var total = bikes + (station.num_bikes_disabled || 0) +
               (station.num_docks_available || 0) + (station.num_docks_disabled || 0);
@@ -459,8 +462,8 @@ function bikeLetter(station) {
   // Never show empty while there is a bike, or full while there is a free dock.
   if (bikes > 0 && level < 1) level = 1;
   if (level >= BIKE_LEVELS && bikes < total) level = BIKE_LEVELS - 1;
-  var base = (station.num_ebikes_available || 0) > 0 ? 'A' : 'a';
-  return String.fromCharCode(base.charCodeAt(0) + level);
+  var ebikes = Math.min(station.num_ebikes_available || 0, BIKE_MAX_EBIKES);
+  return String.fromCharCode('a'.charCodeAt(0) + level) + ebikes;
 }
 
 // Calls back with the status string for the given dock slots.
@@ -473,7 +476,7 @@ function fetchBikes(ids, callback) {
       if (wanted.hasOwnProperty(station.station_id)) wanted[station.station_id] = station;
     });
     callback(null, ids.map(function(id) {
-      return id ? bikeLetter(wanted[id]) : BIKE_NONE;
+      return id ? bikeLetter(wanted[id]) : BIKE_NONE + '0';
     }).join(''));
   });
 }
@@ -601,7 +604,7 @@ function refresh() {
       done();
     });
   } else {
-    dict[keys.BIKES] = new Array(NUM_BIKES + 1).join(BIKE_NONE);
+    dict[keys.BIKES] = new Array(NUM_BIKES + 1).join(BIKE_NONE + '0');
   }
 
   for (var r = 0; r < NUM_ROWS; r++) {
