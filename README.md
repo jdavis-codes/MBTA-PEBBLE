@@ -9,6 +9,10 @@ subway, light rail or commuter rail line + station + direction. The defaults:
 - **Salem → Inbound** to North Station
 - **Central → Southbound** Red Line
 
+![Annotated guide to the watch screen](docs/watch-guide.png)
+
+The screen above uses demo data so that every marker appears at once.
+
 Commuter rail rows show departure times. Subway rows show minutes until each
 train, tagged with the first letter of its destination when trains in that
 direction go to different places (e.g. `A` = Ashmont, `B` = Braintree).
@@ -17,6 +21,27 @@ The Green Line is offered as a single line covering the B, C, D and E branches.
 Its stations are grouped into the shared central stops and each branch's own
 stops, and departures are tagged with their branch letter (e.g. `12B 15D`)
 wherever more than one branch stops.
+
+### Bluebikes docks
+
+Up to six [Bluebikes](https://bluebikes.com/system-data) docks can be shown as
+small circles along the top left, in the order they are set. Each circle fills
+like a pie with the share of the dock's spaces that hold a rentable bike (an
+empty ring means no bikes). The shape turns square when there is almost
+nowhere to return a bike: a hollow square for one free space, a solid square
+for none. Each available e-bike (up to eight) is a small dot around the
+shape. Dock status comes from the Bluebikes GBFS feed and refreshes every
+minute; the feed has no per-station query, so each refresh downloads the whole
+system's status (about 235 KB).
+
+### Connection dots
+
+Three dots sit at the top right. From left to right they are the bike docks'
+data, the trains' data and the phone connection. A data dot is solid when its
+data is up to date, pulses while downloading (bike docks every minute,
+timetables every 2 minutes) and turns into an X when the last download failed.
+The bike dot is hidden when no docks are set. The phone dot is filled while
+Bluetooth is connected and hollow when the connection is lost.
 
 ### Settings
 
@@ -39,13 +64,16 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
   row's label once a minute and `!` is shown before the label in between.
   Minor notices (severity below 3) are left out. If the watch ever resets
   during a scroll, alerts stay off until the settings are saved again.
+- **Bluebikes docks**: six slots, each with a search box. Type part of a
+  dock's name and pick it from the list beneath.
 - **Departure warning** per row: while a departure is inside its range it
   blinks (inverted), blinking faster as the end of the range approaches — a
   cue that it's time to leave. Defaults: row 1 on, 30 → 25 min; row 2
   15 → 10 and row 3 10 → 5, both off.
 
 Commuter rail times are scheduled times, replaced by live predictions when
-the MBTA has them (cancelled trips are hidden). The watch requests fresh data
+the MBTA has them. A cancelled train stays at its scheduled time, crossed
+out; a train at least 3 minutes late gets a hatched background. The watch requests fresh data
 every 2 minutes; set `MBTA_API_KEY` in `src/pkjs/index.js` for a higher
 rate limit.
 

@@ -30,6 +30,21 @@ var ALERT_MIN_SEVERITY = 3;
 // Must match ALERT_SIZE - 1 in src/c/watchface.c.
 var ALERT_MAX_CHARS = 160;
 
+// Bluebikes dock status (GBFS). The feed has no per-station query, so the
+// whole system's status is fetched each time.
+var BIKE_STATUS_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json';
+// Must match NUM_BIKES and BIKE_LEVELS in src/c/watchface.c.
+var NUM_BIKES = 6;
+var BIKE_LEVELS = 8;
+var BIKE_NONE = '-';
+// Levels past BIKE_LEVELS; must match src/c/watchface.c.
+var BIKE_ONE_FREE = BIKE_LEVELS + 1;
+var BIKE_FULL = BIKE_LEVELS + 2;
+// Must match BIKE_MAX_EBIKES in src/c/watchface.c.
+var BIKE_MAX_EBIKES = 8;
+// What the watch's REQUEST message asks for; must match src/c/watchface.c.
+var REQUEST_BIKES = 2;
+
 // A fetch still unfinished after this long is treated as hung and abandoned.
 // The iOS Pebble app has no XMLHttpRequest timeout and suspends timers in the
 // background, so this is checked against the clock on the next request.
@@ -74,6 +89,28 @@ function apiGet(path, params, callback) {
   if (MBTA_API_KEY) {
     xhr.setRequestHeader('x-api-key', MBTA_API_KEY);
   }
+  xhr.onload = function() {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
+        callback(null, JSON.parse(xhr.responseText));
+      } catch (e) {
+        callback(e);
+      }
+    } else {
+      callback(new Error('HTTP ' + xhr.status));
+    }
+  };
+  xhr.onerror = function() {
+    callback(new Error('Network error'));
+  };
+  xhr.timeout = 20000;
+  xhr.ontimeout = xhr.onerror;
+  xhr.send();
+}
+
+function getJson(url, callback) {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', url, true);
   xhr.onload = function() {
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
@@ -401,6 +438,85 @@ function fetchAlert(row, callback) {
   });
 }
 
+// The station id chosen for each dock slot ('' if unused). A saved value is
+// "<station id>|<station name>"; the name is only for the settings page.
+function bikeStations(saved) {
+  var ids = [];
+  for (var i = 0; i < NUM_BIKES; i++) {
+    var v = saved['BIKE[' + i + ']'];
+    ids.push(v ? String(v).split('|')[0] : '');
+  }
+  return ids;
+}
+
+function hasBikes(ids) {
+  return ids.some(function(id) { return id; });
+}
+
+// One dock as the watch's two status characters: a letter for how many eighths
+// of the dock's spaces hold a rentable bike, then a digit for how many of
+// those are e-bikes (at most BIKE_MAX_EBIKES).
+function bikeLetter(station) {
+  if (!station || !station.is_installed || !station.is_renting) return 'a0';
+  var bikes = station.num_bikes_available || 0;
+  var total = bikes + (station.num_bikes_disabled || 0) +
+              (station.num_docks_available || 0) + (station.num_docks_disabled || 0);
+  var level = total > 0 ? Math.round(bikes * BIKE_LEVELS / total) : 0;
+  // Never show empty while there is a bike.
+  if (bikes > 0 && level < 1) level = 1;
+  // Nowhere, or almost nowhere, to return a bike is what matters most at a
+  // glance, so it gets its own shapes whatever the share of bikes.
+  var free = station.num_docks_available || 0;
+  if (free === 0) level = BIKE_FULL;
+  else if (free === 1) level = BIKE_ONE_FREE;
+  else if (level >= BIKE_LEVELS) level = BIKE_LEVELS - 1;
+  var ebikes = Math.min(station.num_ebikes_available || 0, BIKE_MAX_EBIKES);
+  return String.fromCharCode('a'.charCodeAt(0) + level) + ebikes;
+}
+
+// Calls back with the status string for the given dock slots.
+function fetchBikes(ids, callback) {
+  getJson(BIKE_STATUS_URL, function(err, json) {
+    if (err) return callback(err);
+    var wanted = {};
+    ids.forEach(function(id) { if (id) wanted[id] = null; });
+    json.data.stations.forEach(function(station) {
+      if (wanted.hasOwnProperty(station.station_id)) wanted[station.station_id] = station;
+    });
+    callback(null, ids.map(function(id) {
+      return id ? bikeLetter(wanted[id]) : BIKE_NONE + '0';
+    }).join(''));
+  });
+}
+
+var s_bikes_started = 0;
+
+// The docks refresh every minute, between the two-minute train refreshes.
+function refreshBikes() {
+  var ids = bikeStations(savedSettings());
+  if (!hasBikes(ids)) {
+    // The docks were removed in the settings: clear them and settle the indicator.
+    var none = {};
+    none[keys.BIKES] = new Array(NUM_BIKES + 1).join(BIKE_NONE + '0');
+    none[keys.BIKE_FAILED] = 0;
+    return sendToWatch(none, 1, 'no docks');
+  }
+  if (Date.now() - s_bikes_started < FETCH_HUNG_MS) return;
+  s_bikes_started = Date.now();
+  fetchBikes(ids, function(err, status) {
+    s_bikes_started = 0;
+    var dict = {};
+    if (err) {
+      console.log('Bluebikes fetch failed: ' + err.message);
+      dict[keys.BIKE_FAILED] = 1;
+      return sendToWatch(dict, 1, 'dock fetch failure');
+    }
+    dict[keys.BIKES] = status;
+    dict[keys.BIKE_FAILED] = 0;
+    sendToWatch(dict, 1, 'dock status ' + status);
+  });
+}
+
 function putRow(dict, row, result) {
   var dest = '';
   var flags = '';
@@ -480,7 +596,11 @@ function refresh() {
     rows.push(rowConfig(i, saved));
     if (rows[i].alerts) pending++;
   }
+  var bikeIds = bikeStations(saved);
+  if (hasBikes(bikeIds)) pending++;
   var failed = 0;
+  // The docks have their own indicator on the watch, separate from the rows.
+  dict[keys.BIKE_FAILED] = 0;
   function done() {
     if (--pending > 0) return;
     s_fetching = false;
@@ -489,6 +609,21 @@ function refresh() {
     dict[keys.FETCH_FAILED] = failed;
     sendToWatch(dict, 2);
     if (s_refetch) refresh();
+  }
+
+  if (hasBikes(bikeIds)) {
+    fetchBikes(bikeIds, function(err, status) {
+      if (fetchId !== s_fetch_id) return;
+      if (err) {
+        console.log('Bluebikes fetch failed: ' + err.message);
+        dict[keys.BIKE_FAILED] = 1;
+      } else {
+        dict[keys.BIKES] = status;
+      }
+      done();
+    });
+  } else {
+    dict[keys.BIKES] = new Array(NUM_BIKES + 1).join(BIKE_NONE + '0');
   }
 
   for (var r = 0; r < NUM_ROWS; r++) {
@@ -551,6 +686,9 @@ Pebble.addEventListener('webviewclosed', function(e) {
       putRow(cleared, row, { mode: MODE_MINUTES, trains: [] });
     }
   }
+  for (var slot = 0; slot < NUM_BIKES; slot++) {
+    delete settings[keys.BIKE + slot];
+  }
   sendToWatch(settings, 3, 'settings');
   if (Object.keys(cleared).length > 0) {
     sendToWatch(cleared, 3, 'cleared rows');
@@ -599,7 +737,9 @@ Pebble.addEventListener('appmessage', function(e) {
   if (payload.DIAG) {
     recordDiag(payload.DIAG);
   }
-  if (payload.REQUEST || !payload.DIAG) {
+  if (payload.REQUEST === REQUEST_BIKES) {
+    refreshBikes();
+  } else if (payload.REQUEST || !payload.DIAG) {
     refresh();
   }
 });
@@ -608,6 +748,6 @@ Pebble.addEventListener('appmessage', function(e) {
 if (typeof module !== 'undefined') {
   module.exports = {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
-    alertText: alertText, alertApplies: alertApplies
+    alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter
   };
 }

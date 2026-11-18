@@ -101,6 +101,20 @@ The `version` in `package.json` is what the Pebble phone app shows for the watch
 - Raise the patch (`make bump`) for every build that is installed on the watch for the user to look at, before the install, so each install shows a new number. Say the version in the message that asks the user to open the app.
 - After the user confirms a version, tag its commit `v<version>` and push the tag with the branch.
 
+## Documentation Voice
+
+Write the README, the watch guide (`docs/watch-guide.html`, rendered to `docs/watch-guide.png`) and other user-facing docs the way the owner writes them. The callout text in the watch guide is the reference:
+
+- Explain what the reader sees and what it means for them, not how the code does it: "A hollow square means almost full: one free parking space."
+- Name things by what they are on the watch: "train timetable header", "data connection", "end of service", "orbiting dots". Avoid internal names (row label, fetch, flag).
+- Give the reason when there is one: "Subway trains depart frequently, so they are shown as minutes to departure."
+- Say where a behaviour is controlled: "If enabled in the watchface settings, ...".
+- Call out what an example shows: "This example shows commuter rail rows...".
+- Full, plain sentences. State lists as `Solid circle: data is up to date.`
+- Spell things out rather than give one example (list every destination letter for every line).
+- American spelling ("canceled").
+- Check every number and behaviour against the code before writing it; do not leave a placeholder.
+
 ## Development Best Practices
 
 - Before every commit, install the build on the user's real watch: start `make watch` in the background (it waits up to 5 minutes for the phone), tell the user in the same turn to open the Pebble app on their phone, and commit only after `App install succeeded.` Do not ask whether the app is open and wait for a reply. See the `pebble-vm-dev` skill.
