@@ -83,14 +83,20 @@ diorite. Two limits:
 
 ## 4. Installing on the real watch
 
-**Ask the user before every watch install and wait for their go-ahead.** They
-have to open the Pebble app on their phone first, with *Dev Connection* turned
-on for the watch (Devices tab, three dot menu on the watch), or the install
-just waits and times out.
+**Every commit is preceded by a watch install** (see `CLAUDE.md`): finish and
+test the change in the emulator, install, then commit.
+
+The install waits for the phone, and the user has to open the Pebble app for it
+to connect (with *Dev Connection* on for the watch: Devices tab, three dot menu).
+Do not ask whether the app is open and wait for an answer. Start the install in
+the background, tell the user in the same turn to open the app, and carry on
+when it finishes:
 
 ```sh
-timeout 90 pebble install --cloudpebble >"$LOG" 2>&1 </dev/null
+make watch        # waits up to 5 minutes for the phone
 ```
+
+If it times out, say so and start it again when the user is ready.
 
 Success ends with `App install succeeded.` `pebble logs --cloudpebble` streams
 logs from the watch and the phone-side JavaScript the same way.

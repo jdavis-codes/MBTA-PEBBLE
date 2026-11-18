@@ -54,8 +54,8 @@ login: ## Sign in to your Pebble account (prints a link)
 status: ## Show whether the Pebble account is signed in
 	@pebble login --status
 
-watch: build ## Install on the real watch (open the Pebble app on your phone first)
-	@timeout 90 pebble install --cloudpebble $(QUIET) || { tail -5 $(LOG); exit 1; }
+watch: build ## Install on the real watch (waits 5 min for the Pebble app on your phone)
+	@timeout 300 pebble install --cloudpebble $(QUIET) || { tail -5 $(LOG); exit 1; }
 	@tail -1 $(LOG)
 
 watch-logs: ## Stream logs from the real watch and phone (Ctrl-C to stop)
