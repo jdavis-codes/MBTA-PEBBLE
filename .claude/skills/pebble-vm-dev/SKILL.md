@@ -24,6 +24,11 @@ The script patches pypkjs (the emulator's phone simulator) to listen on
 
 There is no display, so pass `--vnc` to every command that touches the emulator.
 
+The `Makefile` wraps the common cases with the workarounds below built in:
+`make emu`, `make shot SHOT=path.png`, `make kill`, `make wipe`, `make watch`
+(run `make` for the full list; `PLATFORM=diorite` switches platform). The raw
+commands are:
+
 ```sh
 pebble build
 pebble install --emulator flint --vnc >"$LOG" 2>&1 </dev/null \

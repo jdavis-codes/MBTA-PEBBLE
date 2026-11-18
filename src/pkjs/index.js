@@ -83,20 +83,44 @@ function apiGet(path, params, callback) {
   xhr.send();
 }
 
-// MBTA service days run past midnight (e.g. "25:10"), so early-morning
-// queries need yesterday's date with hours >= 24.
-function serviceWindow(nowMs) {
-  var start = new Date(nowMs - LOOKBACK_MS);
-  var hours = start.getHours();
-  var day = start;
-  if (hours < 3) {
-    day = new Date(start.getTime() - 24 * 60 * 60 * 1000);
-    hours += 24;
+// UTC ms of 2am local on the nth Sunday of a month, given that zone's UTC offset.
+function nthSunday2am(year, month, n, offsetHours) {
+  var firstDow = new Date(Date.UTC(year, month, 1)).getUTCDay();
+  var day = 1 + (7 - firstDow) % 7 + (n - 1) * 7;
+  return Date.UTC(year, month, day, 2 - offsetHours);
+}
+
+// Boston's UTC offset in hours (-4 during daylight time, otherwise -5). Worked
+// out by hand because the phone may be in another timezone and iOS PebbleKit JS
+// is not guaranteed to have Intl timezone support.
+function bostonOffsetHours(ms) {
+  var year = new Date(ms).getUTCFullYear();
+  var dstStart = nthSunday2am(year, 2, 2, -5);
+  var dstEnd = nthSunday2am(year, 10, 1, -4);
+  return ms >= dstStart && ms < dstEnd ? -4 : -5;
+}
+
+// The schedule queries covering departures from LOOKBACK_MS ago onwards, in
+// Boston time. MBTA service days run past midnight (e.g. "25:10"), so before
+// 3am that is yesterday's date with hours >= 24, plus today's service day so
+// the first morning trains show once the last night train has gone.
+function serviceWindows(nowMs) {
+  var startMs = nowMs - LOOKBACK_MS;
+  // Shifted so the UTC getters read Boston wall-clock time.
+  var start = new Date(startMs + bostonOffsetHours(startMs) * 3600000);
+  function ymd(d) {
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
   }
-  return {
-    date: day.getFullYear() + '-' + pad2(day.getMonth() + 1) + '-' + pad2(day.getDate()),
-    minTime: pad2(hours) + ':' + pad2(start.getMinutes())
-  };
+  var hours = start.getUTCHours();
+  var mins = pad2(start.getUTCMinutes());
+  if (hours >= 3) {
+    return [{ date: ymd(start), minTime: pad2(hours) + ':' + mins }];
+  }
+  var yesterday = new Date(start.getTime() - 24 * 60 * 60 * 1000);
+  return [
+    { date: ymd(yesterday), minTime: pad2(hours + 24) + ':' + mins },
+    { date: ymd(start), minTime: '03:00' }
+  ];
 }
 
 function indexIncluded(json) {
@@ -141,35 +165,44 @@ function isCommuterRail(route) {
 // Commuter rail: scheduled departures, overridden by live predictions when available.
 function fetchCommuterRail(row, callback) {
   var nowMs = Date.now();
-  var win = serviceWindow(nowMs);
-  apiGet('/schedules', {
-    'filter[stop]': row.stop,
-    'filter[route]': row.route,
-    'filter[direction_id]': row.direction,
-    'filter[date]': win.date,
-    'filter[min_time]': win.minTime,
-    'include': 'prediction',
-    'sort': 'departure_time',
-    'page[limit]': 20,
-    'fields[schedule]': 'departure_time,arrival_time',
-    'fields[prediction]': 'departure_time,arrival_time,schedule_relationship'
-  }, function(err, json) {
-    if (err) return callback(err);
-    var included = indexIncluded(json);
-    var nowSec = Math.floor(nowMs / 1000);
-    var trains = [];
-    json.data.forEach(function(sched) {
-      var a = sched.attributes;
-      var rel = sched.relationships && sched.relationships.prediction;
-      var pred = rel && rel.data ? included['prediction:' + rel.data.id] : null;
-      var p = pred ? pred.attributes : null;
-      if (isCancelled(p)) return;
-      var t = parseIso((p && (p.departure_time || p.arrival_time)) ||
-                       a.departure_time || a.arrival_time);
-      if (t > nowSec) trains.push({ time: t, dest: ' ' });
+  var nowSec = Math.floor(nowMs / 1000);
+  var windows = serviceWindows(nowMs);
+  var trains = [];
+  var pending = windows.length;
+  var failed = null;
+  windows.forEach(function(win) {
+    apiGet('/schedules', {
+      'filter[stop]': row.stop,
+      'filter[route]': row.route,
+      'filter[direction_id]': row.direction,
+      'filter[date]': win.date,
+      'filter[min_time]': win.minTime,
+      'include': 'prediction',
+      'sort': 'departure_time',
+      'page[limit]': 20,
+      'fields[schedule]': 'departure_time,arrival_time',
+      'fields[prediction]': 'departure_time,arrival_time,schedule_relationship'
+    }, function(err, json) {
+      if (err) {
+        failed = err;
+      } else {
+        var included = indexIncluded(json);
+        json.data.forEach(function(sched) {
+          var a = sched.attributes;
+          var rel = sched.relationships && sched.relationships.prediction;
+          var pred = rel && rel.data ? included['prediction:' + rel.data.id] : null;
+          var p = pred ? pred.attributes : null;
+          if (isCancelled(p)) return;
+          var t = parseIso((p && (p.departure_time || p.arrival_time)) ||
+                           a.departure_time || a.arrival_time);
+          if (t > nowSec) trains.push({ time: t, dest: ' ' });
+        });
+      }
+      if (--pending > 0) return;
+      if (failed) return callback(failed);
+      trains.sort(function(x, y) { return x.time - y.time; });
+      callback(null, { mode: MODE_CLOCK, trains: trains.slice(0, MAX_TIMES) });
     });
-    trains.sort(function(x, y) { return x.time - y.time; });
-    callback(null, { mode: MODE_CLOCK, trains: trains.slice(0, MAX_TIMES) });
   });
 }
 
@@ -311,3 +344,8 @@ Pebble.addEventListener('ready', function() {
 Pebble.addEventListener('appmessage', function() {
   refresh();
 });
+
+// Exposed for tests.
+if (typeof module !== 'undefined') {
+  module.exports = { serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours };
+}

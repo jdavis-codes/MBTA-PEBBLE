@@ -41,6 +41,9 @@ rate limit.
 
 ## Building & running
 
+`make` lists shortcuts for the commands below (`make emu`, `make shot`,
+`make watch`, ...).
+
 ```sh
 pebble build                          # build for all targetPlatforms
 pebble install --emulator emery       # install on the emery emulator
