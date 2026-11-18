@@ -117,3 +117,38 @@ logs from the watch and the phone-side JavaScript the same way.
 - Docs: every page on https://developer.repebble.com has a Markdown version
   (append `.md`); the index is `/llms.txt`.
 - After a UI change, take a screenshot and look at it before reporting.
+
+## 6. Writing the C
+
+- **The emulator does not prove a build is safe on the watch.** A scrolling
+  service-alert header (first an `AppTimer` loop at 60ms, then a
+  `PropertyAnimation` on a clipped `TextLayer`) ran clean on both emulator
+  platforms and took down the real watch twice, about 10 seconds into a
+  scroll, badly enough to need an OS reinstall. The cause was never
+  confirmed; the leading guess is that many seconds of back-to-back
+  full-screen redraws starve the system on real hardware. The feature was
+  removed. Until that is understood:
+  - Do not add any animation that redraws continuously for more than a
+    second or two. The departure blink (one redraw per 125ms or slower) and
+    the fetch pulse (150ms, normally a few seconds) are the only animations
+    known to be fine on hardware.
+  - Treat anything that animates, or that changes how often the screen
+    redraws, as needing the user's explicit go-ahead before it is installed
+    on the watch, and say plainly that it is untested on hardware.
+  - If the watch misbehaves after an install, stop installing, restore the
+    last build the user confirmed, and tell them to keep the app off the
+    watch until then: the phone reinstalls it, and saved settings can
+    re-trigger the same fault.
+- **Look for the documented way first.** Before hand-rolling UI behaviour,
+  check the guides (`/llms.txt`) for a system facility.
+- **The app stack is about 2KB.** Text drawing uses much of it, so keep
+  buffers and arrays out of draw-path locals (make them `static`). In the
+  emulator an overflow shows up as `App fault! ... PC: 0 LR: 0` in the logs,
+  the phone link dropping (hollow connection dot, `the watch didn't answer`),
+  and eventually an "is not responding" screen. A formatted `APP_LOG` inside
+  the draw path is enough to tip it over.
+- **Finding a fault:** `pebble install --emulator flint --vnc --logs` streams
+  logs from launch. Capture frames with the QEMU monitor `screendump`
+  (section 2) when the phone link is down.
+- **Do not start a watch install while the user may be testing.** An install
+  closes the running watchface.
