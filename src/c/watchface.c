@@ -32,6 +32,13 @@
 // How a row shows departures; must match MODE_* in src/pkjs/index.js.
 enum { MODE_CLOCK, MODE_MINUTES };
 
+// Per-departure status letters; must match FLAG_* in src/pkjs/index.js.
+#define FLAG_NONE ' '
+#define FLAG_CANCELLED 'X'
+#define FLAG_DELAYED 'D'
+// Gap between the diagonal lines hatched behind a delayed departure.
+#define HATCH_SPACING 5
+
 typedef enum { FETCH_OK, FETCH_PENDING, FETCH_FAILED } FetchState;
 
 // A departure blinks while inside its section's warning range, speeding up
@@ -44,6 +51,8 @@ typedef struct {
   // One destination letter per departure, or ' ' for none.
   char dest[NUM_SECTIONS][NUM_TIMES + 1];
   uint8_t mode[NUM_SECTIONS];
+  // One FLAG_* per departure.
+  char flags[NUM_SECTIONS][NUM_TIMES + 1];
 } TransitData;
 
 typedef struct {
@@ -91,6 +100,7 @@ typedef struct {
   int32_t departure;
   char text[12];
   char suffix[2];
+  char flag;
 } Cell;
 
 static Window *s_window;
@@ -133,15 +143,20 @@ static void prv_format_clock(time_t t, char *buf, size_t size) {
   }
 }
 
-// Collects up to max upcoming (not yet departed) times into out[]; returns the count.
-static int prv_upcoming(const int32_t *times, const char *dest, time_t now,
-                        int32_t *out, char *out_dest, int max) {
+// Collects up to max upcoming (not yet departed) times into out[]; returns the
+// count. out_dest and out_flags are optional.
+static int prv_upcoming(int section, time_t now, int32_t *out, char *out_dest, char *out_flags,
+                        int max) {
+  const int32_t *times = s_data.times[section];
   int n = 0;
   for (int i = 0; i < NUM_TIMES && n < max; i++) {
     if (times[i] > now) {
       out[n] = times[i];
       if (out_dest) {
-        out_dest[n] = dest ? dest[i] : ' ';
+        out_dest[n] = s_data.dest[section][i];
+      }
+      if (out_flags) {
+        out_flags[n] = s_data.flags[section][i];
       }
       n++;
     }
@@ -212,10 +227,6 @@ static int64_t prv_now_ms(void) {
   return (int64_t)sec * 1000 + ms;
 }
 
-static const int32_t *prv_section_times(int section) {
-  return s_data.times[section];
-}
-
 // Gets a section's warning range in ms before departure; false if disabled or empty.
 static bool prv_warning_range(int section, int64_t *lo_ms, int64_t *hi_ms) {
   if (!s_settings.warn_on[section]) {
@@ -250,12 +261,13 @@ static int prv_departures(void) {
 static int prv_build_cells(int section, time_t now, Cell *cells) {
   int32_t upcoming[MAX_DEPARTURES];
   char dest[MAX_DEPARTURES];
+  char flags[MAX_DEPARTURES];
   bool minutes = s_data.mode[section] == MODE_MINUTES;
-  int n = prv_upcoming(prv_section_times(section), s_data.dest[section], now, upcoming, dest,
-                       prv_departures());
+  int n = prv_upcoming(section, now, upcoming, dest, flags, prv_departures());
   for (int i = 0; i < n; i++) {
     Cell *cell = &cells[i];
     cell->departure = upcoming[i];
+    cell->flag = flags[i];
     cell->suffix[0] = '\0';
     if (minutes) {
       int mins = (int)((upcoming[i] - now) / 60);
@@ -347,6 +359,42 @@ static void prv_draw_no_more(GContext *ctx, GRect space, const RowFont *rf, bool
                 GTextAlignmentCenter);
 }
 
+static GRect prv_shift(GRect r, int dx, int dy) {
+  r.origin.x += dx;
+  r.origin.y += dy;
+  return r;
+}
+
+static void prv_draw_cell_text(GContext *ctx, const Cell *cell, const RowFont *rf, GRect text_box,
+                               GRect suffix_box) {
+  prv_draw_text(ctx, cell->text, rf->font, text_box, GTextAlignmentLeft);
+  if (cell->suffix[0]) {
+    prv_draw_text(ctx, cell->suffix, rf->suffix_font, suffix_box, GTextAlignmentLeft);
+  }
+}
+
+// Fills a rect with "/" diagonal lines, clipped to it.
+static void prv_draw_hatch(GContext *ctx, GRect r, GColor color) {
+  graphics_context_set_stroke_color(ctx, color);
+  int h = r.size.h;
+  for (int off = HATCH_SPACING - h; off < r.size.w; off += HATCH_SPACING) {
+    // The line runs from (off, bottom) up to (off + h - 1, top).
+    int x0 = off, y0 = h - 1, x1 = off + h - 1, y1 = 0;
+    if (x0 < 0) {
+      y0 += x0;
+      x0 = 0;
+    }
+    if (x1 > r.size.w - 1) {
+      y1 += x1 - (r.size.w - 1);
+      x1 = r.size.w - 1;
+    }
+    if (y0 >= y1) {
+      graphics_draw_line(ctx, GPoint(r.origin.x + x0, r.origin.y + y0),
+                         GPoint(r.origin.x + x1, r.origin.y + y1));
+    }
+  }
+}
+
 // Draws a row of cells, one per column; a blinking cell fills its whole column.
 static void prv_draw_row(GContext *ctx, int row_y, int width, int section, const Cell *cells,
                          int n, const RowFont *rf, int64_t now_ms) {
@@ -356,21 +404,45 @@ static void prv_draw_row(GContext *ctx, int row_y, int width, int section, const
     int slot = prv_column_x(i + 1, width) - x;
     int text_w;
     int cell_w = prv_cell_width(&cells[i], rf, &text_w);
-    bool inverted = prv_is_highlighted(section, cells[i].departure, now_ms);
+    bool cancelled = cells[i].flag == FLAG_CANCELLED;
+    bool delayed = cells[i].flag == FLAG_DELAYED;
+    bool inverted = !cancelled && prv_is_highlighted(section, cells[i].departure, now_ms);
+    GColor fg = inverted ? GColorBlack : GColorWhite;
+    GColor bg = inverted ? GColorWhite : GColorBlack;
+    GRect slot_rect = GRect(x, row_y, slot, spec->row_h);
     if (inverted) {
-      graphics_context_set_fill_color(ctx, GColorWhite);
-      graphics_fill_rect(ctx, GRect(x, row_y, slot, spec->row_h), 0, GCornerNone);
+      graphics_context_set_fill_color(ctx, bg);
+      graphics_fill_rect(ctx, slot_rect, 0, GCornerNone);
     }
-    graphics_context_set_text_color(ctx, inverted ? GColorBlack : GColorWhite);
-
     int tx = x + (slot - cell_w) / 2;
-    prv_draw_text(ctx, cells[i].text, rf->font,
-                  GRect(tx, row_y + spec->text_dy, text_w + 4, spec->row_h + 8),
-                  GTextAlignmentLeft);
-    if (cells[i].suffix[0]) {
-      prv_draw_text(ctx, cells[i].suffix, rf->suffix_font,
-                    GRect(tx + text_w + SUFFIX_GAP, row_y + spec->suffix_dy, 20, 20),
-                    GTextAlignmentLeft);
+    GRect text_box = GRect(tx, row_y + spec->text_dy, text_w + 4, spec->row_h + 8);
+    GRect suffix_box = GRect(tx + text_w + SUFFIX_GAP, row_y + spec->suffix_dy, 20, 20);
+    if (delayed) {
+      prv_draw_hatch(ctx, slot_rect, fg);
+      // Outline the text in the background colour so it stays readable.
+      graphics_context_set_text_color(ctx, bg);
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          if (dx || dy) {
+            prv_draw_cell_text(ctx, &cells[i], rf, prv_shift(text_box, dx, dy),
+                               prv_shift(suffix_box, dx, dy));
+          }
+        }
+      }
+    }
+    graphics_context_set_text_color(ctx, fg);
+    prv_draw_cell_text(ctx, &cells[i], rf, text_box, suffix_box);
+    if (cancelled) {
+      // Cross the departure out, corner to corner of its text.
+      int top = row_y + 3;
+      int bottom = row_y + spec->row_h - 4;
+      // A thin line edged in the background colour, so it cuts visibly through the digits.
+      for (int pass = 0; pass < 2; pass++) {
+        graphics_context_set_stroke_color(ctx, pass == 0 ? bg : fg);
+        graphics_context_set_stroke_width(ctx, pass == 0 ? 3 : 1);
+        graphics_draw_line(ctx, GPoint(tx, top), GPoint(tx + cell_w, bottom));
+        graphics_draw_line(ctx, GPoint(tx, bottom), GPoint(tx + cell_w, top));
+      }
     }
   }
   if (n < prv_departures()) {
@@ -435,8 +507,12 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
   for (int section = 0; section < NUM_SECTIONS; section++) {
     int y = sections_top + section * section_h;
     char right[16] = "";
-    if (counts[section] > 0) {
-      prv_format_wait(cells[section][0].departure, now, right, sizeof(right));
+    // The header counts down to the next train that is actually running.
+    for (int i = 0; i < counts[section]; i++) {
+      if (cells[section][i].flag != FLAG_CANCELLED) {
+        prv_format_wait(cells[section][i].departure, now, right, sizeof(right));
+        break;
+      }
     }
     prv_draw_header(ctx, y, width, s_settings.labels[section], right);
     prv_draw_row(ctx, y + HEADER_HEIGHT, width, section, cells[section], counts[section], rf,
@@ -465,9 +541,13 @@ static void prv_update_blink(void) {
     if (prv_warning_range(section, &lo, &hi)) {
       // Only departures that are actually on screen can blink.
       int32_t visible[MAX_DEPARTURES];
-      int n = prv_upcoming(prv_section_times(section), NULL, (time_t)(now_ms / 1000), visible,
-                           NULL, prv_departures());
+      char flags[MAX_DEPARTURES];
+      int n = prv_upcoming(section, (time_t)(now_ms / 1000), visible, NULL, flags,
+                           prv_departures());
       for (int i = 0; i < n; i++) {
+        if (flags[i] == FLAG_CANCELLED) {
+          continue;
+        }
         int64_t remaining = (int64_t)visible[i] * 1000 - now_ms;
         if (remaining > lo && remaining <= hi) {
           if (nearest_in_range < 0 || remaining < nearest_in_range) {
@@ -653,6 +733,14 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
       dest[NUM_TIMES] = '\0';
       changed = true;
     }
+    if ((t = dict_find(iter, MESSAGE_KEY_FLAGS + section)) && t->type == TUPLE_CSTRING) {
+      char *flags = s_data.flags[section];
+      memset(flags, FLAG_NONE, NUM_TIMES);
+      size_t len = strlen(t->value->cstring);
+      memcpy(flags, t->value->cstring, len < NUM_TIMES ? len : NUM_TIMES);
+      flags[NUM_TIMES] = '\0';
+      changed = true;
+    }
     if ((t = dict_find(iter, MESSAGE_KEY_MODE + section))) {
       s_data.mode[section] = prv_tuple_int(t) == MODE_MINUTES ? MODE_MINUTES : MODE_CLOCK;
       changed = true;
@@ -731,6 +819,7 @@ static void prv_init(void) {
   }
   for (int section = 0; section < NUM_SECTIONS; section++) {
     s_data.dest[section][NUM_TIMES] = '\0';
+    s_data.flags[section][NUM_TIMES] = '\0';
   }
 
   time_t now = time(NULL);

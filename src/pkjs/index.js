@@ -12,13 +12,19 @@ var MBTA_API_KEY = '';
 // Must match NUM_TIMES in src/c/watchface.c.
 var MAX_TIMES = 7;
 // Look back this far when querying schedules so delayed trains are still found.
-var LOOKBACK_MS = 20 * 60 * 1000;
+var LOOKBACK_MS = 60 * 60 * 1000;
 
 // Must match NUM_ROWS in src/c/watchface.c.
 var NUM_ROWS = config.ROWS.length;
 // Row display modes; must match RowMode in src/c/watchface.c.
 var MODE_CLOCK = 0;
 var MODE_MINUTES = 1;
+// Per-departure status letters; must match FLAG_* in src/c/watchface.c.
+var FLAG_NONE = ' ';
+var FLAG_CANCELLED = 'X';
+var FLAG_DELAYED = 'D';
+// A commuter rail train predicted this much after its scheduled time is shown as delayed.
+var DELAY_SEC = 3 * 60;
 
 // A fetch still unfinished after this long is treated as hung and abandoned.
 // The iOS Pebble app has no XMLHttpRequest timeout and suspends timers in the
@@ -162,7 +168,8 @@ function isCommuterRail(route) {
   return route.indexOf('CR-') === 0;
 }
 
-// Commuter rail: scheduled departures, overridden by live predictions when available.
+// Commuter rail: scheduled departures, overridden by live predictions when
+// available, with cancelled and delayed trains flagged.
 function fetchCommuterRail(row, callback) {
   var nowMs = Date.now();
   var nowSec = Math.floor(nowMs / 1000);
@@ -192,10 +199,14 @@ function fetchCommuterRail(row, callback) {
           var rel = sched.relationships && sched.relationships.prediction;
           var pred = rel && rel.data ? included['prediction:' + rel.data.id] : null;
           var p = pred ? pred.attributes : null;
-          if (isCancelled(p)) return;
-          var t = parseIso((p && (p.departure_time || p.arrival_time)) ||
-                           a.departure_time || a.arrival_time);
-          if (t > nowSec) trains.push({ time: t, dest: ' ' });
+          var scheduled = parseIso(a.departure_time || a.arrival_time);
+          var predicted = p ? parseIso(p.departure_time || p.arrival_time) : 0;
+          // A cancelled train stays on the timetable at its scheduled time, crossed out.
+          var cancelled = isCancelled(p);
+          var t = cancelled ? scheduled : (predicted || scheduled);
+          var flag = cancelled ? FLAG_CANCELLED
+                   : predicted && predicted - scheduled >= DELAY_SEC ? FLAG_DELAYED : FLAG_NONE;
+          if (t > nowSec) trains.push({ time: t, dest: ' ', flag: flag });
         });
       }
       if (--pending > 0) return;
@@ -249,12 +260,15 @@ function fetchSubway(row, callback) {
 
 function putRow(dict, row, result) {
   var dest = '';
+  var flags = '';
   for (var i = 0; i < MAX_TIMES; i++) {
     var train = result.trains[i];
     dict[keys.TIMES + row * MAX_TIMES + i] = train ? train.time : 0;
     dest += train ? train.dest : ' ';
+    flags += train && train.flag ? train.flag : FLAG_NONE;
   }
   dict[keys.DEST + row] = dest;
+  dict[keys.FLAGS + row] = flags;
   dict[keys.MODE + row] = result.mode;
 }
 
