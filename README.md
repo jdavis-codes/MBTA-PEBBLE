@@ -9,6 +9,10 @@ subway, light rail or commuter rail line + station + direction. The defaults:
 - **Salem → Inbound** to North Station
 - **Central → Southbound** Red Line
 
+![Annotated guide to the watch screen](docs/watch-guide.png)
+
+The screen above uses demo data so that every marker appears at once.
+
 Commuter rail rows show departure times. Subway rows show minutes until each
 train, tagged with the first letter of its destination when trains in that
 direction go to different places (e.g. `A` = Ashmont, `B` = Braintree).
@@ -59,7 +63,8 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
   15 → 10 and row 3 10 → 5, both off.
 
 Commuter rail times are scheduled times, replaced by live predictions when
-the MBTA has them (cancelled trips are hidden). The watch requests fresh data
+the MBTA has them. A cancelled train stays at its scheduled time, crossed
+out; a train at least 3 minutes late gets a hatched background. The watch requests fresh data
 every 2 minutes; set `MBTA_API_KEY` in `src/pkjs/index.js` for a higher
 rate limit.
 
