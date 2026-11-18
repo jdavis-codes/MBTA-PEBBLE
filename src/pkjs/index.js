@@ -494,16 +494,25 @@ var s_bikes_started = 0;
 // The docks refresh every minute, between the two-minute train refreshes.
 function refreshBikes() {
   var ids = bikeStations(savedSettings());
-  if (!hasBikes(ids) || Date.now() - s_bikes_started < FETCH_HUNG_MS) return;
+  if (!hasBikes(ids)) {
+    // The docks were removed in the settings: clear them and settle the indicator.
+    var none = {};
+    none[keys.BIKES] = new Array(NUM_BIKES + 1).join(BIKE_NONE + '0');
+    none[keys.BIKE_FAILED] = 0;
+    return sendToWatch(none, 1, 'no docks');
+  }
+  if (Date.now() - s_bikes_started < FETCH_HUNG_MS) return;
   s_bikes_started = Date.now();
   fetchBikes(ids, function(err, status) {
     s_bikes_started = 0;
+    var dict = {};
     if (err) {
       console.log('Bluebikes fetch failed: ' + err.message);
-      return;
+      dict[keys.BIKE_FAILED] = 1;
+      return sendToWatch(dict, 1, 'dock fetch failure');
     }
-    var dict = {};
     dict[keys.BIKES] = status;
+    dict[keys.BIKE_FAILED] = 0;
     sendToWatch(dict, 1, 'dock status ' + status);
   });
 }
@@ -590,6 +599,8 @@ function refresh() {
   var bikeIds = bikeStations(saved);
   if (hasBikes(bikeIds)) pending++;
   var failed = 0;
+  // The docks have their own indicator on the watch, separate from the rows.
+  dict[keys.BIKE_FAILED] = 0;
   function done() {
     if (--pending > 0) return;
     s_fetching = false;
@@ -605,7 +616,7 @@ function refresh() {
       if (fetchId !== s_fetch_id) return;
       if (err) {
         console.log('Bluebikes fetch failed: ' + err.message);
-        failed++;
+        dict[keys.BIKE_FAILED] = 1;
       } else {
         dict[keys.BIKES] = status;
       }

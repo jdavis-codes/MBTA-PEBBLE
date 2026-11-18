@@ -100,6 +100,8 @@ enum { MODE_CLOCK, MODE_MINUTES };
 #define HATCH_SPACING 5
 
 typedef enum { FETCH_OK, FETCH_PENDING, FETCH_FAILED } FetchState;
+// Trains and docks are fetched separately, so each has its own indicator.
+typedef enum { FETCH_TRAINS, FETCH_BIKES, NUM_FETCHES } FetchKind;
 
 // A departure blinks while inside its section's warning range, speeding up
 // from BLINK_SLOW_MS to BLINK_FAST_MS per toggle as the range end approaches.
@@ -169,9 +171,9 @@ static TransitData s_data;
 static Settings s_settings;
 static bool s_has_data;
 static bool s_connected;
-static FetchState s_fetch_state;
+static FetchState s_fetch_state[NUM_FETCHES];
 static AppTimer *s_fetch_timer;
-static int s_fetch_ticks;
+static int s_fetch_ticks[NUM_FETCHES];
 static time_t s_last_request;
 // Two characters per dock: the fill level as a letter from 'a' (0) to
 // 'a' + BIKE_LEVELS, then BIKE_ONE_FREE and BIKE_FULL, or BIKE_NONE when the
@@ -725,6 +727,37 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
   prv_scroll_after_draw(layer_get_bounds(layer).size.w, end_ms);
 }
 
+static bool prv_has_bikes(void) {
+  for (int i = 0; i < NUM_BIKES; i++) {
+    if (s_bikes[2 * i] != BIKE_NONE) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// One fetch indicator: a steady dot, a pulsing dot while fetching, an X on failure.
+static void prv_draw_fetch_dot(GContext *ctx, GPoint dot, FetchKind kind) {
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  if (s_fetch_state[kind] == FETCH_FAILED) {
+    int r = BT_DOT_RADIUS;
+    graphics_draw_line(ctx, GPoint(dot.x - r, dot.y - r), GPoint(dot.x + r, dot.y + r));
+    graphics_draw_line(ctx, GPoint(dot.x - r, dot.y + r), GPoint(dot.x + r, dot.y - r));
+  } else if (s_fetch_state[kind] == FETCH_PENDING) {
+    // Radius runs 0..3..0 so the dot grows and shrinks.
+    int phase = s_fetch_ticks[kind] % (2 * BT_DOT_RADIUS);
+    int r = phase <= BT_DOT_RADIUS ? phase : 2 * BT_DOT_RADIUS - phase;
+    if (r > 0) {
+      graphics_fill_circle(ctx, dot, r);
+    } else {
+      graphics_draw_pixel(ctx, dot);
+    }
+  } else {
+    graphics_fill_circle(ctx, dot, BT_DOT_RADIUS);
+  }
+}
+
 // Draws the dock pies. Each keeps its slot's position so docks are recognised
 // by where they sit. One dot per available e-bike orbits the pie, starting at
 // 12 o'clock and going clockwise.
@@ -802,23 +835,11 @@ static void prv_canvas_draw(Layer *layer, GContext *ctx) {
   }
 
   dot.x -= FETCH_DOT_SPACING;
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  graphics_context_set_stroke_color(ctx, GColorWhite);
-  if (s_fetch_state == FETCH_FAILED) {
-    int r = BT_DOT_RADIUS;
-    graphics_draw_line(ctx, GPoint(dot.x - r, dot.y - r), GPoint(dot.x + r, dot.y + r));
-    graphics_draw_line(ctx, GPoint(dot.x - r, dot.y + r), GPoint(dot.x + r, dot.y - r));
-  } else if (s_fetch_state == FETCH_PENDING) {
-    // Radius runs 0..3..0 so the dot grows and shrinks.
-    int phase = s_fetch_ticks % (2 * BT_DOT_RADIUS);
-    int r = phase <= BT_DOT_RADIUS ? phase : 2 * BT_DOT_RADIUS - phase;
-    if (r > 0) {
-      graphics_fill_circle(ctx, dot, r);
-    } else {
-      graphics_draw_pixel(ctx, dot);
-    }
-  } else {
-    graphics_fill_circle(ctx, dot, BT_DOT_RADIUS);
+  prv_draw_fetch_dot(ctx, dot, FETCH_TRAINS);
+  // The docks' dot only appears when there are docks, or their fetch failed.
+  if (prv_has_bikes() || s_fetch_state[FETCH_BIKES] != FETCH_OK) {
+    dot.x -= FETCH_DOT_SPACING;
+    prv_draw_fetch_dot(ctx, dot, FETCH_BIKES);
   }
 
   prv_draw_bikes(ctx);
@@ -992,34 +1013,57 @@ static bool prv_read_settings(DictionaryIterator *iter) {
 
 static void prv_fetch_timer_cb(void *context);
 
-static void prv_set_fetch_state(FetchState state) {
-  if (s_fetch_timer) {
+static void prv_set_fetch_state(FetchKind kind, FetchState state) {
+  s_fetch_state[kind] = state;
+  s_fetch_ticks[kind] = 0;
+  bool pending = false;
+  for (int i = 0; i < NUM_FETCHES; i++) {
+    pending |= s_fetch_state[i] == FETCH_PENDING;
+  }
+  // One timer pulses whichever indicators are waiting.
+  if (pending && !s_fetch_timer) {
+    s_fetch_timer = app_timer_register(FETCH_PULSE_MS, prv_fetch_timer_cb, NULL);
+  } else if (!pending && s_fetch_timer) {
     app_timer_cancel(s_fetch_timer);
     s_fetch_timer = NULL;
-  }
-  s_fetch_state = state;
-  s_fetch_ticks = 0;
-  if (state == FETCH_PENDING) {
-    s_fetch_timer = app_timer_register(FETCH_PULSE_MS, prv_fetch_timer_cb, NULL);
   }
   if (s_canvas) {
     layer_mark_dirty(s_canvas);
   }
 }
 
-// Animates the pulse, and fails the fetch if the phone never answers.
+// Animates the pulse, and fails a fetch if the phone never answers.
 static void prv_fetch_timer_cb(void *context) {
   s_fetch_timer = NULL;
-  if (++s_fetch_ticks * FETCH_PULSE_MS >= FETCH_TIMEOUT_MS) {
-    prv_set_fetch_state(FETCH_FAILED);
-    return;
+  bool pending = false;
+  for (int i = 0; i < NUM_FETCHES; i++) {
+    if (s_fetch_state[i] != FETCH_PENDING) {
+      continue;
+    }
+    if (++s_fetch_ticks[i] * FETCH_PULSE_MS >= FETCH_TIMEOUT_MS) {
+      s_fetch_state[i] = FETCH_FAILED;
+    } else {
+      pending = true;
+    }
   }
-  s_fetch_timer = app_timer_register(FETCH_PULSE_MS, prv_fetch_timer_cb, NULL);
+  if (pending) {
+    s_fetch_timer = app_timer_register(FETCH_PULSE_MS, prv_fetch_timer_cb, NULL);
+  }
   layer_mark_dirty(s_canvas);
 }
 
-// Asks the phone for everything, or only the docks. The fetch dot follows only
-// full requests; a docks-only request is answered without a FETCH_FAILED count.
+// Applies a request's progress to the indicators it covers.
+static void prv_set_request_state(uint8_t what, FetchState state) {
+  if (what == REQUEST_ALL) {
+    prv_set_fetch_state(FETCH_TRAINS, state);
+  }
+  if (what == REQUEST_BIKES || prv_has_bikes()) {
+    prv_set_fetch_state(FETCH_BIKES, state);
+  }
+}
+
+// Asks the phone for everything, or only the docks. A full request also
+// fetches the docks when there are any.
 static void prv_request_update(uint8_t what) {
   DictionaryIterator *iter;
   bool ok = app_message_outbox_begin(&iter) == APP_MSG_OK;
@@ -1027,26 +1071,15 @@ static void prv_request_update(uint8_t what) {
     dict_write_uint8(iter, MESSAGE_KEY_REQUEST, what);
     ok = app_message_outbox_send() == APP_MSG_OK;
   }
-  if (what == REQUEST_ALL) {
-    prv_set_fetch_state(ok ? FETCH_PENDING : FETCH_FAILED);
-  }
-}
-
-static bool prv_has_bikes(void) {
-  for (int i = 0; i < NUM_BIKES; i++) {
-    if (s_bikes[2 * i] != BIKE_NONE) {
-      return true;
-    }
-  }
-  return false;
+  prv_set_request_state(what, ok ? FETCH_PENDING : FETCH_FAILED);
 }
 
 static void prv_outbox_failed(DictionaryIterator *iter, AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_WARNING, "outbox failed reason=%d", (int)reason);
-  // Only a failed departure request fails the fetch, not a failed diagnostic.
+  // Only a failed data request fails a fetch, not a failed diagnostic.
   Tuple *request = dict_find(iter, MESSAGE_KEY_REQUEST);
-  if (request && request->value->uint8 == REQUEST_ALL) {
-    prv_set_fetch_state(FETCH_FAILED);
+  if (request) {
+    prv_set_request_state(request->value->uint8, FETCH_FAILED);
   }
 }
 
@@ -1141,7 +1174,11 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   // Every fetch result from the phone says how many rows failed to load.
   Tuple *failed = dict_find(iter, MESSAGE_KEY_FETCH_FAILED);
   if (failed) {
-    prv_set_fetch_state(prv_tuple_int(failed) > 0 ? FETCH_FAILED : FETCH_OK);
+    prv_set_fetch_state(FETCH_TRAINS, prv_tuple_int(failed) > 0 ? FETCH_FAILED : FETCH_OK);
+  }
+  Tuple *bike_failed = dict_find(iter, MESSAGE_KEY_BIKE_FAILED);
+  if (bike_failed) {
+    prv_set_fetch_state(FETCH_BIKES, prv_tuple_int(bike_failed) > 0 ? FETCH_FAILED : FETCH_OK);
   }
 
   // The phone is reachable right now, so report the previous run if still owed.
@@ -1167,9 +1204,9 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   // The handler also runs whenever the phone sets the watch's clock, so the
   // time since the last request is checked too.
   time_t now = time(NULL);
-  APP_LOG(APP_LOG_LEVEL_INFO, "hb up=%lds heap=%d draw=%dms fetch=%d bt=%d",
+  APP_LOG(APP_LOG_LEVEL_INFO, "hb up=%lds heap=%d draw=%dms fetch=%d bikes=%d bt=%d",
           (long)(now - (time_t)s_diag.started), (int)heap_bytes_free(), s_max_draw_ms,
-          (int)s_fetch_state, (int)s_connected);
+          (int)s_fetch_state[FETCH_TRAINS], (int)s_fetch_state[FETCH_BIKES], (int)s_connected);
   if (s_diag.stage == STAGE_INIT ||
       (s_diag.stage == STAGE_RUNNING && tick_time->tm_min % DIAG_PERSIST_MINUTES == 0)) {
     prv_breadcrumb(STAGE_RUNNING, 0);
@@ -1190,7 +1227,7 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
 static void prv_connection_handler(bool connected) {
   // The phone fetches by itself when the app starts or the watch reconnects.
   if (connected && !s_connected) {
-    prv_set_fetch_state(FETCH_PENDING);
+    prv_set_request_state(REQUEST_ALL, FETCH_PENDING);
   }
   s_connected = connected;
   if (s_canvas) {
@@ -1257,7 +1294,7 @@ static void prv_init(void) {
   connection_service_subscribe((ConnectionHandlers) {
     .pebble_app_connection_handler = prv_connection_handler,
   });
-  s_fetch_state = FETCH_FAILED;
+  s_fetch_state[FETCH_TRAINS] = FETCH_FAILED;
   prv_connection_handler(connection_service_peek_pebble_app_connection());
   prv_update_blink();
 }
