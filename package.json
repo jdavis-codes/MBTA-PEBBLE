@@ -40,6 +40,16 @@
     ],
     "resources": {
       "media": []
-    }
+    },
+    "usesPermissions": [
+      {
+        "name": "Internet",
+        "parameters": {
+          "domains": [
+            "api-v3.mbta.com"
+          ]
+        }
+      }
+    ]
   }
 }
