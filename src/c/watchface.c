@@ -65,6 +65,10 @@ typedef struct {
 #define NUM_BIKES 5
 #define BIKE_LEVELS 8
 #define BIKE_NONE '-'
+// Levels above BIKE_LEVELS are drawn as squares so a dock with nowhere to
+// return a bike stands out: a hollow square for one free space, solid for none.
+#define BIKE_ONE_FREE (BIKE_LEVELS + 1)
+#define BIKE_FULL (BIKE_LEVELS + 2)
 // Up to this many e-bikes are shown as dots around a pie.
 #define BIKE_MAX_EBIKES 8
 // Centre of the first pie, and the gap between pies; the orbiting dots reach
@@ -170,8 +174,8 @@ static AppTimer *s_fetch_timer;
 static int s_fetch_ticks;
 static time_t s_last_request;
 // Two characters per dock: the fill level as a letter from 'a' (0) to
-// 'a' + BIKE_LEVELS, or BIKE_NONE when the slot is unused, then the number of
-// e-bikes as a digit.
+// 'a' + BIKE_LEVELS, then BIKE_ONE_FREE and BIKE_FULL, or BIKE_NONE when the
+// slot is unused; then the number of e-bikes as a digit.
 static char s_bikes[2 * NUM_BIKES + 1] = "-0-0-0-0-0";
 static Diag s_diag;
 // The previous run's breadcrumb as text, until the phone has received it.
@@ -733,12 +737,22 @@ static void prv_draw_bikes(GContext *ctx) {
   for (int i = 0; i < NUM_BIKES; i++) {
     int level = s_bikes[2 * i] - 'a';
     int ebikes = s_bikes[2 * i + 1] - '0';
-    if (level < 0 || level > BIKE_LEVELS) {
+    if (level < 0 || level > BIKE_FULL) {
       continue;
     }
     GPoint centre = GPoint(BIKE_LEFT + i * BIKE_SPACING, BIKE_Y);
-    graphics_draw_circle(ctx, centre, BT_DOT_RADIUS);
-    if (level == BIKE_LEVELS) {
+    GRect square = GRect(centre.x - BT_DOT_RADIUS, centre.y - BT_DOT_RADIUS,
+                         2 * BT_DOT_RADIUS + 1, 2 * BT_DOT_RADIUS + 1);
+    if (level == BIKE_FULL) {
+      graphics_fill_rect(ctx, square, 0, GCornerNone);
+    } else if (level == BIKE_ONE_FREE) {
+      graphics_draw_rect(ctx, square);
+    } else {
+      graphics_draw_circle(ctx, centre, BT_DOT_RADIUS);
+    }
+    if (level > BIKE_LEVELS) {
+      // Squares have no pie inside.
+    } else if (level == BIKE_LEVELS) {
       graphics_fill_circle(ctx, centre, BT_DOT_RADIUS);
     } else if (level > 0) {
       // A sector clockwise from 12 o'clock.

@@ -23,8 +23,10 @@ wherever more than one branch stops.
 Up to five [Bluebikes](https://bluebikes.com/system-data) docks can be shown as
 small circles along the top left, in the order they are set. Each circle fills
 like a pie with the share of the dock's spaces that hold a rentable bike (an
-empty ring means no bikes), and a small dot beside it means an e-bike is
-available. Dock status comes from the Bluebikes GBFS feed and refreshes every
+empty ring means no bikes). The shape turns square when there is almost
+nowhere to return a bike: a hollow square for one free space, a solid square
+for none. Each available e-bike (up to eight) is a small dot around the
+shape. Dock status comes from the Bluebikes GBFS feed and refreshes every
 minute; the feed has no per-station query, so each refresh downloads the whole
 system's status (about 235 KB).
 

@@ -37,6 +37,9 @@ var BIKE_STATUS_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json
 var NUM_BIKES = 5;
 var BIKE_LEVELS = 8;
 var BIKE_NONE = '-';
+// Levels past BIKE_LEVELS; must match src/c/watchface.c.
+var BIKE_ONE_FREE = BIKE_LEVELS + 1;
+var BIKE_FULL = BIKE_LEVELS + 2;
 // Must match BIKE_MAX_EBIKES in src/c/watchface.c.
 var BIKE_MAX_EBIKES = 8;
 // What the watch's REQUEST message asks for; must match src/c/watchface.c.
@@ -459,9 +462,14 @@ function bikeLetter(station) {
   var total = bikes + (station.num_bikes_disabled || 0) +
               (station.num_docks_available || 0) + (station.num_docks_disabled || 0);
   var level = total > 0 ? Math.round(bikes * BIKE_LEVELS / total) : 0;
-  // Never show empty while there is a bike, or full while there is a free dock.
+  // Never show empty while there is a bike.
   if (bikes > 0 && level < 1) level = 1;
-  if (level >= BIKE_LEVELS && bikes < total) level = BIKE_LEVELS - 1;
+  // Nowhere, or almost nowhere, to return a bike is what matters most at a
+  // glance, so it gets its own shapes whatever the share of bikes.
+  var free = station.num_docks_available || 0;
+  if (free === 0) level = BIKE_FULL;
+  else if (free === 1) level = BIKE_ONE_FREE;
+  else if (level >= BIKE_LEVELS) level = BIKE_LEVELS - 1;
   var ebikes = Math.min(station.num_ebikes_available || 0, BIKE_MAX_EBIKES);
   return String.fromCharCode('a'.charCodeAt(0) + level) + ebikes;
 }
