@@ -253,13 +253,14 @@ function refresh() {
   var saved = savedSettings();
   var dict = {};
   var pending = NUM_ROWS;
+  var failed = 0;
   function done() {
     if (--pending > 0) return;
     s_fetching = false;
-    // Rows that failed to load are omitted so the watch keeps its last data.
-    if (Object.keys(dict).length > 0) {
-      sendToWatch(dict, 2);
-    }
+    // Rows that failed to load are omitted so the watch keeps its last data;
+    // the count tells it to show the fetch as failed.
+    dict[keys.FETCH_FAILED] = failed;
+    sendToWatch(dict, 2);
     if (s_refetch) refresh();
   }
 
@@ -273,6 +274,7 @@ function refresh() {
         if (err) {
           console.log('Row ' + (row + 1) + ' (' + cfg.route + ' ' + cfg.stop + ') fetch failed: ' +
                       err.message);
+          failed++;
         } else {
           putRow(dict, row, result);
         }

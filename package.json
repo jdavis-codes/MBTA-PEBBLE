@@ -36,7 +36,8 @@
       "WARN_ON[3]",
       "WARN_START[3]",
       "WARN_END[3]",
-      "DEPARTURES"
+      "DEPARTURES",
+      "FETCH_FAILED"
     ],
     "resources": {
       "media": []

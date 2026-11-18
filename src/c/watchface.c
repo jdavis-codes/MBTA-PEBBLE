@@ -17,6 +17,12 @@
 // Phone connection dot in the top right corner: filled when connected, hollow when not.
 #define BT_DOT_RADIUS 3
 #define BT_DOT_MARGIN 3
+// Fetch status dot, left of the connection dot: steady after a good fetch,
+// pulsing while waiting for the phone, an X when the fetch failed.
+#define FETCH_DOT_SPACING 11
+#define FETCH_PULSE_MS 150
+// The phone gives up on a hung fetch after 30s; allow for that plus delivery.
+#define FETCH_TIMEOUT_MS 40000
 
 // One section per departure row (header + times); must match ROWS in src/pkjs/config.js.
 #define NUM_SECTIONS 3
@@ -25,6 +31,8 @@
 
 // How a row shows departures; must match MODE_* in src/pkjs/index.js.
 enum { MODE_CLOCK, MODE_MINUTES };
+
+typedef enum { FETCH_OK, FETCH_PENDING, FETCH_FAILED } FetchState;
 
 // A departure blinks while inside its section's warning range, speeding up
 // from BLINK_SLOW_MS to BLINK_FAST_MS per toggle as the range end approaches.
@@ -91,6 +99,9 @@ static TransitData s_data;
 static Settings s_settings;
 static bool s_has_data;
 static bool s_connected;
+static FetchState s_fetch_state;
+static AppTimer *s_fetch_timer;
+static int s_fetch_ticks;
 static char s_time_buffer[8];
 static AppTimer *s_blink_timer;
 static BlinkState s_blink[NUM_SECTIONS];
@@ -381,6 +392,26 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
     graphics_draw_circle(ctx, dot, BT_DOT_RADIUS);
   }
 
+  dot.x -= FETCH_DOT_SPACING;
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  if (s_fetch_state == FETCH_FAILED) {
+    int r = BT_DOT_RADIUS;
+    graphics_draw_line(ctx, GPoint(dot.x - r, dot.y - r), GPoint(dot.x + r, dot.y + r));
+    graphics_draw_line(ctx, GPoint(dot.x - r, dot.y + r), GPoint(dot.x + r, dot.y - r));
+  } else if (s_fetch_state == FETCH_PENDING) {
+    // Radius runs 0..3..0 so the dot grows and shrinks.
+    int phase = s_fetch_ticks % (2 * BT_DOT_RADIUS);
+    int r = phase <= BT_DOT_RADIUS ? phase : 2 * BT_DOT_RADIUS - phase;
+    if (r > 0) {
+      graphics_fill_circle(ctx, dot, r);
+    } else {
+      graphics_draw_pixel(ctx, dot);
+    }
+  } else {
+    graphics_fill_circle(ctx, dot, BT_DOT_RADIUS);
+  }
+
   for (int section = 0; section < NUM_SECTIONS; section++) {
     int y = sections_top + section * section_h;
     char right[16] = "";
@@ -542,13 +573,46 @@ static bool prv_read_settings(DictionaryIterator *iter) {
   return changed;
 }
 
+static void prv_fetch_timer_cb(void *context);
+
+static void prv_set_fetch_state(FetchState state) {
+  if (s_fetch_timer) {
+    app_timer_cancel(s_fetch_timer);
+    s_fetch_timer = NULL;
+  }
+  s_fetch_state = state;
+  s_fetch_ticks = 0;
+  if (state == FETCH_PENDING) {
+    s_fetch_timer = app_timer_register(FETCH_PULSE_MS, prv_fetch_timer_cb, NULL);
+  }
+  if (s_canvas) {
+    layer_mark_dirty(s_canvas);
+  }
+}
+
+// Animates the pulse, and fails the fetch if the phone never answers.
+static void prv_fetch_timer_cb(void *context) {
+  s_fetch_timer = NULL;
+  if (++s_fetch_ticks * FETCH_PULSE_MS >= FETCH_TIMEOUT_MS) {
+    prv_set_fetch_state(FETCH_FAILED);
+    return;
+  }
+  s_fetch_timer = app_timer_register(FETCH_PULSE_MS, prv_fetch_timer_cb, NULL);
+  layer_mark_dirty(s_canvas);
+}
+
 static void prv_request_update(void) {
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    prv_set_fetch_state(FETCH_FAILED);
     return;
   }
   dict_write_uint8(iter, MESSAGE_KEY_REQUEST, 1);
-  app_message_outbox_send();
+  prv_set_fetch_state(app_message_outbox_send() == APP_MSG_OK ? FETCH_PENDING : FETCH_FAILED);
+}
+
+static void prv_outbox_failed(DictionaryIterator *iter, AppMessageResult reason, void *context) {
+  prv_set_fetch_state(FETCH_FAILED);
 }
 
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
@@ -580,6 +644,12 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     persist_write_data(PERSIST_KEY_DATA, &s_data, sizeof(s_data));
   }
 
+  // Every fetch result from the phone says how many rows failed to load.
+  Tuple *failed = dict_find(iter, MESSAGE_KEY_FETCH_FAILED);
+  if (failed) {
+    prv_set_fetch_state(prv_tuple_int(failed) > 0 ? FETCH_FAILED : FETCH_OK);
+  }
+
   bool settings_changed = prv_read_settings(iter);
   if (changed || settings_changed) {
     layer_mark_dirty(s_canvas);
@@ -597,6 +667,10 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
 }
 
 static void prv_connection_handler(bool connected) {
+  // The phone fetches by itself when the app starts or the watch reconnects.
+  if (connected && !s_connected) {
+    prv_set_fetch_state(FETCH_PENDING);
+  }
   s_connected = connected;
   if (s_canvas) {
     layer_mark_dirty(s_canvas);
@@ -651,12 +725,14 @@ static void prv_init(void) {
   window_stack_push(s_window, true);
 
   app_message_register_inbox_received(prv_inbox_received);
+  app_message_register_outbox_failed(prv_outbox_failed);
   app_message_open(512, 64);
 
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
   connection_service_subscribe((ConnectionHandlers) {
     .pebble_app_connection_handler = prv_connection_handler,
   });
+  s_fetch_state = FETCH_FAILED;
   prv_connection_handler(connection_service_peek_pebble_app_connection());
   prv_update_blink();
 }
@@ -664,6 +740,9 @@ static void prv_init(void) {
 static void prv_deinit(void) {
   if (s_blink_timer) {
     app_timer_cancel(s_blink_timer);
+  }
+  if (s_fetch_timer) {
+    app_timer_cancel(s_fetch_timer);
   }
   tick_timer_service_unsubscribe();
   connection_service_unsubscribe();
