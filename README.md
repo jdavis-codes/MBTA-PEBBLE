@@ -24,7 +24,7 @@ wherever more than one branch stops.
 
 ### Bluebikes docks
 
-Up to five [Bluebikes](https://bluebikes.com/system-data) docks can be shown as
+Up to six [Bluebikes](https://bluebikes.com/system-data) docks can be shown as
 small circles along the top left, in the order they are set. Each circle fills
 like a pie with the share of the dock's spaces that hold a rentable bike (an
 empty ring means no bikes). The shape turns square when there is almost
@@ -64,7 +64,7 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
   row's label once a minute and `!` is shown before the label in between.
   Minor notices (severity below 3) are left out. If the watch ever resets
   during a scroll, alerts stay off until the settings are saved again.
-- **Bluebikes docks**: five slots, each with a search box. Type part of a
+- **Bluebikes docks**: six slots, each with a search box. Type part of a
   dock's name and pick it from the list beneath.
 - **Departure warning** per row: while a departure is inside its range it
   blinks (inverted), blinking faster as the end of the range approaches — a

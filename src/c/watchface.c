@@ -62,7 +62,7 @@ typedef struct {
 // Bluebikes docks, shown as small pies along the top left: how full of bikes
 // each dock is, with a dot beside it when an e-bike is available.
 // Must match NUM_BIKES and BIKE_LEVELS in src/pkjs/index.js.
-#define NUM_BIKES 5
+#define NUM_BIKES 6
 #define BIKE_LEVELS 8
 #define BIKE_NONE '-'
 // Levels above BIKE_LEVELS are drawn as squares so a dock with nowhere to
@@ -178,7 +178,7 @@ static time_t s_last_request;
 // Two characters per dock: the fill level as a letter from 'a' (0) to
 // 'a' + BIKE_LEVELS, then BIKE_ONE_FREE and BIKE_FULL, or BIKE_NONE when the
 // slot is unused; then the number of e-bikes as a digit.
-static char s_bikes[2 * NUM_BIKES + 1] = "-0-0-0-0-0";
+static char s_bikes[2 * NUM_BIKES + 1] = "-0-0-0-0-0-0";
 static Diag s_diag;
 // The previous run's breadcrumb as text, until the phone has received it.
 static char s_prev_diag[96];

@@ -113,7 +113,7 @@ function rowSection(row, i, saved) {
 }
 
 // Must match NUM_BIKES in src/pkjs/index.js.
-var NUM_BIKES = 5;
+var NUM_BIKES = 6;
 var BIKE_NONE_OPTION = { value: '', label: 'None' };
 
 // A dock's saved value is "<station id>|<station name>", so the name can be
@@ -133,7 +133,7 @@ function bikeSection(saved) {
     { type: 'heading', defaultValue: 'Bluebikes docks' },
     {
       type: 'text',
-      defaultValue: 'Up to five docks, shown as small circles along the top left of ' +
+      defaultValue: 'Up to six docks, shown as small circles along the top left of ' +
                     'the watch in this order. Each fills like a pie with the share ' +
                     'of its spaces holding a bike; a dot beside it means an e-bike ' +
                     'is available. Type part of a name to search, then pick the dock.'

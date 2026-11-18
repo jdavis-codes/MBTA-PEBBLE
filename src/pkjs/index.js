@@ -34,7 +34,7 @@ var ALERT_MAX_CHARS = 160;
 // whole system's status is fetched each time.
 var BIKE_STATUS_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json';
 // Must match NUM_BIKES and BIKE_LEVELS in src/c/watchface.c.
-var NUM_BIKES = 5;
+var NUM_BIKES = 6;
 var BIKE_LEVELS = 8;
 var BIKE_NONE = '-';
 // Levels past BIKE_LEVELS; must match src/c/watchface.c.

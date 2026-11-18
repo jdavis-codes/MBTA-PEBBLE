@@ -280,7 +280,7 @@ module.exports = function() {
   }
 
   // Bluebikes docks: each slot has a search box that filters the select below it.
-  var NUM_BIKES = 5;
+  var NUM_BIKES = 6;
   var BIKE_MATCH_LIMIT = 40;
   var BIKE_INFO_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_information.json';
   var bikeStations = null;
