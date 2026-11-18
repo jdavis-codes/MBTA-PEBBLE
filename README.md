@@ -34,6 +34,15 @@ shape. Dock status comes from the Bluebikes GBFS feed and refreshes every
 minute; the feed has no per-station query, so each refresh downloads the whole
 system's status (about 235 KB).
 
+### Connection dots
+
+Three dots sit at the top right. From left to right they are the bike docks'
+data, the trains' data and the phone connection. A data dot is solid when its
+data is up to date, pulses while downloading (bike docks every minute,
+timetables every 2 minutes) and turns into an X when the last download failed.
+The bike dot is hidden when no docks are set. The phone dot is filled while
+Bluetooth is connected and hollow when the connection is lost.
+
 ### Settings
 
 Open the settings page (via [Clay](https://github.com/pebble-dev/clay), defined
