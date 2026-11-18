@@ -287,7 +287,14 @@ static int prv_cell_width(const Cell *cell, const RowFont *rf, int *text_w) {
   return *text_w + SUFFIX_GAP + prv_text_width(cell->suffix, rf->suffix_font);
 }
 
-// Picks the largest font allowed for the departure count that fits every row on one line.
+// The row is a timetable with one equal-width column per departure shown, so
+// times stay put as trains run out. Returns the left edge of a column.
+static int prv_column_x(int column, int width) {
+  return column * width / prv_departures();
+}
+
+// Picks the largest font allowed for the departure count that fits every
+// departure inside its column.
 static const RowFont *prv_pick_row_font(Cell cells[][MAX_DEPARTURES], const int *counts,
                                         int width) {
   int count = prv_departures();
@@ -295,12 +302,12 @@ static const RowFont *prv_pick_row_font(Cell cells[][MAX_DEPARTURES], const int 
   for (int f = first; f < NUM_ROW_FONTS; f++) {
     bool fits = true;
     for (int section = 0; section < NUM_SECTIONS && fits; section++) {
-      int total = counts[section] * MIN_CELL_GAP;
-      for (int i = 0; i < counts[section]; i++) {
+      for (int i = 0; i < counts[section] && fits; i++) {
         int text_w;
-        total += prv_cell_width(&cells[section][i], &s_row_fonts[f], &text_w);
+        int column_w = prv_column_x(i + 1, width) - prv_column_x(i, width);
+        fits = prv_cell_width(&cells[section][i], &s_row_fonts[f], &text_w) + MIN_CELL_GAP
+               <= column_w;
       }
-      fits = total <= width;
     }
     if (fits) {
       return &s_row_fonts[f];
@@ -309,36 +316,46 @@ static const RowFont *prv_pick_row_font(Cell cells[][MAX_DEPARTURES], const int 
   return &s_row_fonts[NUM_ROW_FONTS - 1];
 }
 
-// Draws a row of cells. Each cell gets a slot sized to its content plus an even
-// share of the spare width; a blinking cell fills its whole slot.
+// Fills the columns left empty once trains run out with the longest message
+// that fits, in the row font or the largest smaller one.
+static void prv_draw_no_more(GContext *ctx, GRect space, const RowFont *rf, bool any_trains) {
+  static const char *const s_some[] = { "No more trains", "No more", "-" };
+  static const char *const s_none[] = { "No trains" };
+  const char *const *texts = any_trains ? s_some : s_none;
+  int num_texts = any_trains ? (int)ARRAY_LENGTH(s_some) : (int)ARRAY_LENGTH(s_none);
+  if (!s_has_data) {
+    static const char *const s_loading[] = { "Loading..." };
+    texts = s_loading;
+    num_texts = 1;
+  }
+  const char *text = texts[num_texts - 1];
+  const RowFont *font = &s_row_fonts[NUM_ROW_FONTS - 1];
+  bool found = false;
+  for (int t = 0; t < num_texts && !found; t++) {
+    for (const RowFont *f = rf; f < s_row_fonts + NUM_ROW_FONTS && !found; f++) {
+      if (prv_text_width(texts[t], f->font) + 2 * MIN_CELL_GAP <= space.size.w) {
+        text = texts[t];
+        font = f;
+        found = true;
+      }
+    }
+  }
+  graphics_context_set_text_color(ctx, GColorWhite);
+  // A smaller font is centred vertically in the taller row.
+  int y = space.origin.y + (space.size.h - font->spec->row_h) / 2 + font->spec->text_dy;
+  prv_draw_text(ctx, text, font->font, GRect(space.origin.x, y, space.size.w, font->spec->row_h + 8),
+                GTextAlignmentCenter);
+}
+
+// Draws a row of cells, one per column; a blinking cell fills its whole column.
 static void prv_draw_row(GContext *ctx, int row_y, int width, int section, const Cell *cells,
                          int n, const RowFont *rf, int64_t now_ms) {
   const RowFontSpec *spec = rf->spec;
-  if (n == 0) {
-    graphics_context_set_text_color(ctx, GColorWhite);
-    prv_draw_text(ctx, s_has_data ? "No trains" : "Loading...", rf->font,
-                  GRect(0, row_y + spec->text_dy, width, spec->row_h + 8), GTextAlignmentCenter);
-    return;
-  }
-
-  int widths[MAX_DEPARTURES];
-  int text_ws[MAX_DEPARTURES];
-  int total = 0;
   for (int i = 0; i < n; i++) {
-    widths[i] = prv_cell_width(&cells[i], rf, &text_ws[i]);
-    total += widths[i];
-  }
-  int spare = width - total;
-  if (spare < 0) {
-    spare = 0;
-  }
-
-  int x = 0;
-  for (int i = 0; i < n; i++) {
-    int slot = widths[i] + spare / n + (i < spare % n ? 1 : 0);
-    if (i == n - 1) {
-      slot = width - x;
-    }
+    int x = prv_column_x(i, width);
+    int slot = prv_column_x(i + 1, width) - x;
+    int text_w;
+    int cell_w = prv_cell_width(&cells[i], rf, &text_w);
     bool inverted = prv_is_highlighted(section, cells[i].departure, now_ms);
     if (inverted) {
       graphics_context_set_fill_color(ctx, GColorWhite);
@@ -346,16 +363,19 @@ static void prv_draw_row(GContext *ctx, int row_y, int width, int section, const
     }
     graphics_context_set_text_color(ctx, inverted ? GColorBlack : GColorWhite);
 
-    int tx = x + (slot - widths[i]) / 2;
+    int tx = x + (slot - cell_w) / 2;
     prv_draw_text(ctx, cells[i].text, rf->font,
-                  GRect(tx, row_y + spec->text_dy, text_ws[i] + 4, spec->row_h + 8),
+                  GRect(tx, row_y + spec->text_dy, text_w + 4, spec->row_h + 8),
                   GTextAlignmentLeft);
     if (cells[i].suffix[0]) {
       prv_draw_text(ctx, cells[i].suffix, rf->suffix_font,
-                    GRect(tx + text_ws[i] + SUFFIX_GAP, row_y + spec->suffix_dy, 20, 20),
+                    GRect(tx + text_w + SUFFIX_GAP, row_y + spec->suffix_dy, 20, 20),
                     GTextAlignmentLeft);
     }
-    x += slot;
+  }
+  if (n < prv_departures()) {
+    int x = prv_column_x(n, width);
+    prv_draw_no_more(ctx, GRect(x, row_y, width - x, spec->row_h), rf, n > 0);
   }
 }
 
