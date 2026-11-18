@@ -18,6 +18,16 @@ Its stations are grouped into the shared central stops and each branch's own
 stops, and departures are tagged with their branch letter (e.g. `12B 15D`)
 wherever more than one branch stops.
 
+### Bluebikes docks
+
+Up to five [Bluebikes](https://bluebikes.com/system-data) docks can be shown as
+small circles along the top left, in the order they are set. Each circle fills
+like a pie with the share of the dock's spaces that hold a rentable bike (an
+empty ring means no bikes), and a small dot beside it means an e-bike is
+available. Dock status comes from the Bluebikes GBFS feed and refreshes every
+minute; the feed has no per-station query, so each refresh downloads the whole
+system's status (about 235 KB).
+
 ### Settings
 
 Open the settings page (via [Clay](https://github.com/pebble-dev/clay), defined
@@ -39,6 +49,8 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
   row's label once a minute and `!` is shown before the label in between.
   Minor notices (severity below 3) are left out. If the watch ever resets
   during a scroll, alerts stay off until the settings are saved again.
+- **Bluebikes docks**: five slots, each with a search box. Type part of a
+  dock's name and pick it from the list beneath.
 - **Departure warning** per row: while a departure is inside its range it
   blinks (inverted), blinking faster as the end of the range approaches — a
   cue that it's time to leave. Defaults: row 1 on, 30 → 25 min; row 2

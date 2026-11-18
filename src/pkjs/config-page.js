@@ -279,7 +279,89 @@ module.exports = function() {
     });
   }
 
+  // Bluebikes docks: each slot has a search box that filters the select below it.
+  var NUM_BIKES = 5;
+  var BIKE_MATCH_LIMIT = 40;
+  var BIKE_INFO_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_information.json';
+  var bikeStations = null;
+
+  function setBikeStatus(text) {
+    var status = clayConfig.getItemById('bike-status');
+    if (!status) return;
+    if (text) {
+      status.set(text);
+      status.show();
+    } else {
+      status.hide();
+    }
+  }
+
+  function bikeLabel(value) {
+    return value.split('|').slice(1).join('|') || value;
+  }
+
+  // Offers "None", the slot's current dock, and the docks whose names contain
+  // every word typed.
+  function filterBikes(slot) {
+    var item = clayConfig.getItemByMessageKey('BIKE[' + slot + ']');
+    var current = item.get();
+    var words = clayConfig.getItemById('bike-search-' + slot).get().toLowerCase()
+      .split(/\s+/).filter(function(w) { return w; });
+    var options = [{ value: '', label: 'None' }];
+    if (current) options.push({ value: current, label: bikeLabel(current) });
+    var matches = 0;
+    if (bikeStations && words.length) {
+      bikeStations.forEach(function(station) {
+        if (station.value === current) return;
+        var name = station.label.toLowerCase();
+        for (var i = 0; i < words.length; i++) {
+          if (name.indexOf(words[i]) < 0) return;
+        }
+        if (++matches <= BIKE_MATCH_LIMIT) options.push(station);
+      });
+      var shown = Math.min(matches, BIKE_MATCH_LIMIT);
+      setBikeStatus(matches === 0 ? 'No docks match "' + words.join(' ') + '".'
+                  : shown + (matches > shown ? ' of ' + matches : '') + ' matching dock' +
+                    (matches === 1 ? ' is' : 's are') + ' in the Dock ' + (slot + 1) +
+                    ' list. Tap it to pick one.');
+    }
+    setOptions(item, options, current);
+  }
+
+  function loadBikeStations() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', BIKE_INFO_URL, true);
+    xhr.onload = function() {
+      try {
+        bikeStations = JSON.parse(xhr.responseText).data.stations.map(function(s) {
+          return { value: s.station_id + '|' + s.name, label: s.name };
+        }).sort(function(a, b) {
+          return a.label < b.label ? -1 : a.label > b.label ? 1 : 0;
+        });
+        setBikeStatus('');
+      } catch (e) {
+        setBikeStatus('Could not load Bluebikes docks. Check your connection.');
+      }
+    };
+    xhr.onerror = function() {
+      setBikeStatus('Could not load Bluebikes docks. Check your connection.');
+    };
+    xhr.send();
+  }
+
   clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {
+    for (var slot = 0; slot < NUM_BIKES; slot++) {
+      (function(s) {
+        var search = clayConfig.getItemById('bike-search-' + s);
+        if (!search) return;
+        // 'input' fires on every keystroke; Clay's own change event only on blur.
+        search.$manipulatorTarget[0].addEventListener('input', function() {
+          filterBikes(s);
+        });
+      })(slot);
+    }
+    loadBikeStations();
+
     for (var row = 0; row < NUM_ROWS; row++) {
       (function(r) {
         rowItem('ROUTE', r).on('change', function() {

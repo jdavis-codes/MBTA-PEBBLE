@@ -112,6 +112,52 @@ function rowSection(row, i, saved) {
   };
 }
 
+// Must match NUM_BIKES in src/pkjs/index.js.
+var NUM_BIKES = 5;
+var BIKE_NONE_OPTION = { value: '', label: 'None' };
+
+// A dock's saved value is "<station id>|<station name>", so the name can be
+// shown again before (or without) the station list loading.
+function bikeOptions(saved) {
+  var options = [BIKE_NONE_OPTION];
+  if (saved) {
+    options.push({ value: saved, label: String(saved).split('|').slice(1).join('|') || saved });
+  }
+  return options;
+}
+
+// The settings page (config-page.js) turns each search box into a live filter
+// for the select beneath it.
+function bikeSection(saved) {
+  var items = [
+    { type: 'heading', defaultValue: 'Bluebikes docks' },
+    {
+      type: 'text',
+      defaultValue: 'Up to five docks, shown as small circles along the top left of ' +
+                    'the watch in this order. Each fills like a pie with the share ' +
+                    'of its spaces holding a bike; a dot beside it means an e-bike ' +
+                    'is available. Type part of a name to search, then pick the dock.'
+    },
+    { type: 'text', id: 'bike-status', defaultValue: 'Loading Bluebikes docks…' }
+  ];
+  for (var i = 0; i < NUM_BIKES; i++) {
+    items.push({
+      type: 'input',
+      id: 'bike-search-' + i,
+      label: 'Dock ' + (i + 1) + ' search',
+      attributes: { placeholder: 'e.g. kendall', autocomplete: 'off', autocapitalize: 'off' }
+    });
+    items.push({
+      type: 'select',
+      messageKey: 'BIKE[' + i + ']',
+      label: 'Dock ' + (i + 1),
+      defaultValue: '',
+      options: bikeOptions(saved['BIKE[' + i + ']'])
+    });
+  }
+  return { type: 'section', items: items };
+}
+
 // saved: the flat settings Clay keeps in localStorage ('clay-settings').
 function buildConfig(saved) {
   saved = saved || {};
@@ -144,6 +190,7 @@ function buildConfig(saved) {
   ].concat(ROWS.map(function(row, i) {
     return rowSection(row, i, saved);
   })).concat([
+    bikeSection(saved),
     { type: 'submit', defaultValue: 'Save Settings' }
   ]);
 }

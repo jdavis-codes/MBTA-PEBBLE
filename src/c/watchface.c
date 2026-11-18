@@ -59,6 +59,16 @@ typedef struct {
 // The phone gives up on a hung fetch after 30s; allow for that plus delivery.
 #define FETCH_TIMEOUT_MS 40000
 
+// Bluebikes docks, shown as small pies along the top left: how full of bikes
+// each dock is, with a dot beside it when an e-bike is available.
+// Must match NUM_BIKES and BIKE_LEVELS in src/pkjs/index.js.
+#define NUM_BIKES 5
+#define BIKE_LEVELS 8
+#define BIKE_NONE '-'
+// What the REQUEST message asks the phone for; must match src/pkjs/index.js.
+#define REQUEST_ALL 1
+#define REQUEST_BIKES 2
+
 // One section per departure row (header + times); must match ROWS in src/pkjs/config.js.
 #define NUM_SECTIONS 3
 // Includes the terminator; the settings page limits labels to 23 characters.
@@ -148,6 +158,10 @@ static FetchState s_fetch_state;
 static AppTimer *s_fetch_timer;
 static int s_fetch_ticks;
 static time_t s_last_request;
+// One character per dock: BIKE_NONE when the slot is unused, otherwise a letter
+// whose position in the alphabet is the fill level 0..BIKE_LEVELS, in upper
+// case when an e-bike is available.
+static char s_bikes[NUM_BIKES + 1] = "-----";
 static Diag s_diag;
 // The previous run's breadcrumb as text, until the phone has received it.
 static char s_prev_diag[96];
@@ -696,6 +710,38 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
   prv_scroll_after_draw(layer_get_bounds(layer).size.w, end_ms);
 }
 
+// Draws the dock pies. Each keeps its slot's position so docks are recognised
+// by where they sit.
+static void prv_draw_bikes(GContext *ctx) {
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_context_set_stroke_color(ctx, GColorWhite);
+  for (int i = 0; i < NUM_BIKES; i++) {
+    char c = s_bikes[i];
+    bool ebike = c >= 'A' && c <= 'A' + BIKE_LEVELS;
+    int level = ebike ? c - 'A' : c - 'a';
+    if (level < 0 || level > BIKE_LEVELS) {
+      continue;
+    }
+    GPoint centre = GPoint(BT_DOT_MARGIN + BT_DOT_RADIUS + i * FETCH_DOT_SPACING,
+                           BT_DOT_MARGIN + BT_DOT_RADIUS);
+    graphics_draw_circle(ctx, centre, BT_DOT_RADIUS);
+    if (level == BIKE_LEVELS) {
+      graphics_fill_circle(ctx, centre, BT_DOT_RADIUS);
+    } else if (level > 0) {
+      // A sector clockwise from 12 o'clock.
+      GRect box = GRect(centre.x - BT_DOT_RADIUS, centre.y - BT_DOT_RADIUS,
+                        2 * BT_DOT_RADIUS + 1, 2 * BT_DOT_RADIUS + 1);
+      graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, BT_DOT_RADIUS + 1, 0,
+                           TRIG_MAX_ANGLE * level / BIKE_LEVELS);
+    }
+    if (ebike) {
+      // A small satellite at the upper right.
+      graphics_fill_rect(ctx, GRect(centre.x + BT_DOT_RADIUS + 1, centre.y - BT_DOT_RADIUS - 2, 2, 2),
+                         0, GCornerNone);
+    }
+  }
+}
+
 static void prv_canvas_draw(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   int width = bounds.size.w;
@@ -744,6 +790,8 @@ static void prv_canvas_draw(Layer *layer, GContext *ctx) {
   } else {
     graphics_fill_circle(ctx, dot, BT_DOT_RADIUS);
   }
+
+  prv_draw_bikes(ctx);
 
   for (int section = 0; section < NUM_SECTIONS; section++) {
     int y = sections_top + section * section_h;
@@ -940,20 +988,34 @@ static void prv_fetch_timer_cb(void *context) {
   layer_mark_dirty(s_canvas);
 }
 
-static void prv_request_update(void) {
+// Asks the phone for everything, or only the docks. The fetch dot follows only
+// full requests; a docks-only request is answered without a FETCH_FAILED count.
+static void prv_request_update(uint8_t what) {
   DictionaryIterator *iter;
-  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
-    prv_set_fetch_state(FETCH_FAILED);
-    return;
+  bool ok = app_message_outbox_begin(&iter) == APP_MSG_OK;
+  if (ok) {
+    dict_write_uint8(iter, MESSAGE_KEY_REQUEST, what);
+    ok = app_message_outbox_send() == APP_MSG_OK;
   }
-  dict_write_uint8(iter, MESSAGE_KEY_REQUEST, 1);
-  prv_set_fetch_state(app_message_outbox_send() == APP_MSG_OK ? FETCH_PENDING : FETCH_FAILED);
+  if (what == REQUEST_ALL) {
+    prv_set_fetch_state(ok ? FETCH_PENDING : FETCH_FAILED);
+  }
+}
+
+static bool prv_has_bikes(void) {
+  for (int i = 0; i < NUM_BIKES; i++) {
+    if (s_bikes[i] != BIKE_NONE) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static void prv_outbox_failed(DictionaryIterator *iter, AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_WARNING, "outbox failed reason=%d", (int)reason);
   // Only a failed departure request fails the fetch, not a failed diagnostic.
-  if (dict_find(iter, MESSAGE_KEY_REQUEST)) {
+  Tuple *request = dict_find(iter, MESSAGE_KEY_REQUEST);
+  if (request && request->value->uint8 == REQUEST_ALL) {
     prv_set_fetch_state(FETCH_FAILED);
   }
 }
@@ -1038,6 +1100,15 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     persist_write_data(PERSIST_KEY_DATA, &s_data, sizeof(s_data));
   }
 
+  Tuple *bikes = dict_find(iter, MESSAGE_KEY_BIKES);
+  if (bikes && bikes->type == TUPLE_CSTRING &&
+      strncmp(s_bikes, bikes->value->cstring, NUM_BIKES) != 0) {
+    memset(s_bikes, BIKE_NONE, NUM_BIKES);
+    size_t len = strlen(bikes->value->cstring);
+    memcpy(s_bikes, bikes->value->cstring, len < NUM_BIKES ? len : NUM_BIKES);
+    layer_mark_dirty(s_canvas);
+  }
+
   // Every fetch result from the phone says how many rows failed to load.
   Tuple *failed = dict_find(iter, MESSAGE_KEY_FETCH_FAILED);
   if (failed) {
@@ -1075,9 +1146,15 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
     prv_breadcrumb(STAGE_RUNNING, 0);
   }
   s_max_draw_ms = 0;
-  if (tick_time->tm_min % REFRESH_MINUTES == 0 && now - s_last_request >= 60) {
-    s_last_request = now;
-    prv_request_update();
+  // Trains refresh every REFRESH_MINUTES; docks every minute in between.
+  if (now - s_last_request >= 50) {
+    if (tick_time->tm_min % REFRESH_MINUTES == 0) {
+      s_last_request = now;
+      prv_request_update(REQUEST_ALL);
+    } else if (prv_has_bikes()) {
+      s_last_request = now;
+      prv_request_update(REQUEST_BIKES);
+    }
   }
 }
 
