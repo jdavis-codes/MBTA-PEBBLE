@@ -12,16 +12,33 @@ var MBTA_API_KEY = '';
 // Must match NUM_TIMES in src/c/watchface.c.
 var MAX_TIMES = 7;
 // Look back this far when querying schedules so delayed trains are still found.
-var LOOKBACK_MS = 20 * 60 * 1000;
+var LOOKBACK_MS = 60 * 60 * 1000;
 
 // Must match NUM_ROWS in src/c/watchface.c.
 var NUM_ROWS = config.ROWS.length;
 // Row display modes; must match RowMode in src/c/watchface.c.
 var MODE_CLOCK = 0;
 var MODE_MINUTES = 1;
+// Per-departure status letters; must match FLAG_* in src/c/watchface.c.
+var FLAG_NONE = ' ';
+var FLAG_CANCELLED = 'X';
+var FLAG_DELAYED = 'D';
+// A commuter rail train predicted this much after its scheduled time is shown as delayed.
+var DELAY_SEC = 3 * 60;
+// Alerts below this MBTA severity (0-10) are notices such as parking or stairs.
+var ALERT_MIN_SEVERITY = 3;
+// Must match ALERT_SIZE - 1 in src/c/watchface.c.
+var ALERT_MAX_CHARS = 160;
+
+// A fetch still unfinished after this long is treated as hung and abandoned.
+// The iOS Pebble app has no XMLHttpRequest timeout and suspends timers in the
+// background, so this is checked against the clock on the next request.
+var FETCH_HUNG_MS = 30 * 1000;
 
 var s_fetching = false;
 var s_refetch = false;
+var s_fetch_started = 0;
+var s_fetch_id = 0;
 
 function pad2(n) {
   return (n < 10 ? '0' : '') + n;
@@ -76,20 +93,44 @@ function apiGet(path, params, callback) {
   xhr.send();
 }
 
-// MBTA service days run past midnight (e.g. "25:10"), so early-morning
-// queries need yesterday's date with hours >= 24.
-function serviceWindow(nowMs) {
-  var start = new Date(nowMs - LOOKBACK_MS);
-  var hours = start.getHours();
-  var day = start;
-  if (hours < 3) {
-    day = new Date(start.getTime() - 24 * 60 * 60 * 1000);
-    hours += 24;
+// UTC ms of 2am local on the nth Sunday of a month, given that zone's UTC offset.
+function nthSunday2am(year, month, n, offsetHours) {
+  var firstDow = new Date(Date.UTC(year, month, 1)).getUTCDay();
+  var day = 1 + (7 - firstDow) % 7 + (n - 1) * 7;
+  return Date.UTC(year, month, day, 2 - offsetHours);
+}
+
+// Boston's UTC offset in hours (-4 during daylight time, otherwise -5). Worked
+// out by hand because the phone may be in another timezone and iOS PebbleKit JS
+// is not guaranteed to have Intl timezone support.
+function bostonOffsetHours(ms) {
+  var year = new Date(ms).getUTCFullYear();
+  var dstStart = nthSunday2am(year, 2, 2, -5);
+  var dstEnd = nthSunday2am(year, 10, 1, -4);
+  return ms >= dstStart && ms < dstEnd ? -4 : -5;
+}
+
+// The schedule queries covering departures from LOOKBACK_MS ago onwards, in
+// Boston time. MBTA service days run past midnight (e.g. "25:10"), so before
+// 3am that is yesterday's date with hours >= 24, plus today's service day so
+// the first morning trains show once the last night train has gone.
+function serviceWindows(nowMs) {
+  var startMs = nowMs - LOOKBACK_MS;
+  // Shifted so the UTC getters read Boston wall-clock time.
+  var start = new Date(startMs + bostonOffsetHours(startMs) * 3600000);
+  function ymd(d) {
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
   }
-  return {
-    date: day.getFullYear() + '-' + pad2(day.getMonth() + 1) + '-' + pad2(day.getDate()),
-    minTime: pad2(hours) + ':' + pad2(start.getMinutes())
-  };
+  var hours = start.getUTCHours();
+  var mins = pad2(start.getUTCMinutes());
+  if (hours >= 3) {
+    return [{ date: ymd(start), minTime: pad2(hours) + ':' + mins }];
+  }
+  var yesterday = new Date(start.getTime() - 24 * 60 * 60 * 1000);
+  return [
+    { date: ymd(yesterday), minTime: pad2(hours + 24) + ':' + mins },
+    { date: ymd(start), minTime: '03:00' }
+  ];
 }
 
 function indexIncluded(json) {
@@ -140,13 +181,15 @@ function rowConfig(row, saved) {
     var v = saved[key + '[' + row + ']'];
     return v === undefined || v === null || v === '' ? fallback : String(v);
   }
+  var alerts = saved['ALERT_ON[' + row + ']'];
   var dir = pick('DIR', defaults.direction.value);
   var colon = dir.indexOf(':');
   return {
     route: pick('ROUTE', defaults.route.value),
     stop: pick('STOP', defaults.stop.value),
     direction: colon < 0 ? dir : dir.substring(0, colon),
-    destination: colon < 0 ? null : dir.substring(colon + 1)
+    destination: colon < 0 ? null : dir.substring(colon + 1),
+    alerts: alerts === true || alerts === 1 || alerts === '1' || alerts === 'true'
   };
 }
 
@@ -161,45 +204,60 @@ var SERVED_HEADSIGNS = {
   'Foxboro': ['Foxboro', 'Foxboro (Shuttle)']
 };
 
-// Commuter rail: scheduled departures, overridden by live predictions when available.
+// Commuter rail: scheduled departures, overridden by live predictions when
+// available, with cancelled and delayed trains flagged.
 function fetchCommuterRail(row, callback) {
   var nowMs = Date.now();
-  var win = serviceWindow(nowMs);
-  apiGet('/schedules', {
-    'filter[stop]': row.stop,
-    'filter[route]': row.route,
-    'filter[direction_id]': row.direction,
-    'filter[date]': win.date,
-    'filter[min_time]': win.minTime,
-    'include': 'prediction,trip',
-    'sort': 'departure_time',
-    // A single-endpoint filter drops some schedules, so ask for more to fill the row.
-    'page[limit]': row.destination ? 40 : 20,
-    'fields[schedule]': 'departure_time,arrival_time',
-    'fields[prediction]': 'departure_time,arrival_time,schedule_relationship',
-    'fields[trip]': 'headsign'
-  }, function(err, json) {
-    if (err) return callback(err);
-    var included = indexIncluded(json);
-    var nowSec = Math.floor(nowMs / 1000);
-    var served = row.destination ? (SERVED_HEADSIGNS[row.destination] || [row.destination]) : null;
-    var trains = [];
-    json.data.forEach(function(sched) {
-      var a = sched.attributes;
-      var rel = sched.relationships || {};
-      if (served) {
-        var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
-        if (!trip || served.indexOf(trip.attributes.headsign) < 0) return;
+  var nowSec = Math.floor(nowMs / 1000);
+  var windows = serviceWindows(nowMs);
+  var served = row.destination ? (SERVED_HEADSIGNS[row.destination] || [row.destination]) : null;
+  var trains = [];
+  var pending = windows.length;
+  var failed = null;
+  windows.forEach(function(win) {
+    apiGet('/schedules', {
+      'filter[stop]': row.stop,
+      'filter[route]': row.route,
+      'filter[direction_id]': row.direction,
+      'filter[date]': win.date,
+      'filter[min_time]': win.minTime,
+      'include': 'prediction,trip',
+      'sort': 'departure_time',
+      // A single-endpoint filter drops some schedules, so ask for more to fill the row.
+      'page[limit]': row.destination ? 40 : 20,
+      'fields[schedule]': 'departure_time,arrival_time',
+      'fields[prediction]': 'departure_time,arrival_time,schedule_relationship',
+      'fields[trip]': 'headsign'
+    }, function(err, json) {
+      if (err) {
+        failed = err;
+      } else {
+        var included = indexIncluded(json);
+        json.data.forEach(function(sched) {
+          var a = sched.attributes;
+          var rel = sched.relationships || {};
+          if (served) {
+            var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
+            if (!trip || served.indexOf(trip.attributes.headsign) < 0) return;
+          }
+          var pred = rel.prediction && rel.prediction.data
+            ? included['prediction:' + rel.prediction.data.id] : null;
+          var p = pred ? pred.attributes : null;
+          var scheduled = parseIso(a.departure_time || a.arrival_time);
+          var predicted = p ? parseIso(p.departure_time || p.arrival_time) : 0;
+          // A cancelled train stays on the timetable at its scheduled time, crossed out.
+          var cancelled = isCancelled(p);
+          var t = cancelled ? scheduled : (predicted || scheduled);
+          var flag = cancelled ? FLAG_CANCELLED
+                   : predicted && predicted - scheduled >= DELAY_SEC ? FLAG_DELAYED : FLAG_NONE;
+          if (t > nowSec) trains.push({ time: t, dest: ' ', flag: flag });
+        });
       }
-      var pred = rel.prediction && rel.prediction.data ? included['prediction:' + rel.prediction.data.id] : null;
-      var p = pred ? pred.attributes : null;
-      if (isCancelled(p)) return;
-      var t = parseIso((p && (p.departure_time || p.arrival_time)) ||
-                       a.departure_time || a.arrival_time);
-      if (t > nowSec) trains.push({ time: t, dest: ' ' });
+      if (--pending > 0) return;
+      if (failed) return callback(failed);
+      trains.sort(function(x, y) { return x.time - y.time; });
+      callback(null, { mode: MODE_CLOCK, trains: trains.slice(0, MAX_TIMES) });
     });
-    trains.sort(function(x, y) { return x.time - y.time; });
-    callback(null, { mode: MODE_CLOCK, trains: trains.slice(0, MAX_TIMES) });
   });
 }
 
@@ -297,14 +355,63 @@ function fetchPredictions(row, showBranches, callback) {
   });
 }
 
+// The watch fonts are only relied on for ASCII, and it measures text in bytes.
+function alertText(header) {
+  var text = String(header || '')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^ | $/g, '');
+  if (text.length > ALERT_MAX_CHARS) {
+    text = text.slice(0, ALERT_MAX_CHARS - 3) + '...';
+  }
+  return text;
+}
+
+// Whether an alert applies to this row's line, station and direction. An
+// alert that names no station or direction covers all of them.
+function alertApplies(alert, row) {
+  // A merged Green Line row lists several route ids.
+  var routes = row.route.split(',');
+  return (alert.attributes.informed_entity || []).some(function(e) {
+    return routes.indexOf(e.route) >= 0 &&
+           (!e.stop || e.stop === row.stop) &&
+           (e.direction_id === null || e.direction_id === undefined ||
+            String(e.direction_id) === row.direction);
+  });
+}
+
+// The most severe alert in effect now for the row, as text ('' if none).
+function fetchAlert(row, callback) {
+  apiGet('/alerts', {
+    'filter[route]': row.route,
+    'filter[datetime]': 'NOW',
+    'fields[alert]': 'header,severity,informed_entity'
+  }, function(err, json) {
+    if (err) return callback(err);
+    var best = null;
+    json.data.forEach(function(alert) {
+      var severity = alert.attributes.severity || 0;
+      if (severity < ALERT_MIN_SEVERITY || !alertApplies(alert, row)) return;
+      if (!best || severity > best.attributes.severity) best = alert;
+    });
+    callback(null, best ? alertText(best.attributes.header) : '');
+  });
+}
+
 function putRow(dict, row, result) {
   var dest = '';
+  var flags = '';
   for (var i = 0; i < MAX_TIMES; i++) {
     var train = result.trains[i];
     dict[keys.TIMES + row * MAX_TIMES + i] = train ? train.time : 0;
     dest += train ? train.dest : NO_BRANCH;
+    flags += train && train.flag ? train.flag : FLAG_NONE;
   }
   dict[keys.DEST + row] = dest;
+  dict[keys.FLAGS + row] = flags;
   dict[keys.MODE + row] = result.mode;
 }
 
@@ -347,35 +454,69 @@ function pumpOutbox() {
   });
 }
 
+var s_refreshes = 0;
+
 function refresh() {
+  // Every tenth refresh (about 20 minutes) the history is logged again, so a
+  // log capture attached at any time sees it without the app restarting.
+  if (++s_refreshes % 10 === 0) logDiagHistory();
   if (s_fetching) {
-    s_refetch = true;
-    return;
+    if (Date.now() - s_fetch_started < FETCH_HUNG_MS) {
+      s_refetch = true;
+      return;
+    }
+    console.log('Abandoning hung fetch');
   }
   s_fetching = true;
   s_refetch = false;
+  s_fetch_started = Date.now();
+  var fetchId = ++s_fetch_id;
 
   var saved = savedSettings();
   var dict = {};
+  var rows = [];
   var pending = NUM_ROWS;
+  for (var i = 0; i < NUM_ROWS; i++) {
+    rows.push(rowConfig(i, saved));
+    if (rows[i].alerts) pending++;
+  }
+  var failed = 0;
   function done() {
     if (--pending > 0) return;
     s_fetching = false;
-    // Rows that failed to load are omitted so the watch keeps its last data.
-    if (Object.keys(dict).length > 0) {
-      sendToWatch(dict, 2);
-    }
+    // Rows that failed to load are omitted so the watch keeps its last data;
+    // the count tells it to show the fetch as failed.
+    dict[keys.FETCH_FAILED] = failed;
+    sendToWatch(dict, 2);
     if (s_refetch) refresh();
   }
 
   for (var r = 0; r < NUM_ROWS; r++) {
     (function(row) {
-      var cfg = rowConfig(row, saved);
+      var cfg = rows[row];
+      if (cfg.alerts) {
+        fetchAlert(cfg, function(err, text) {
+          if (fetchId !== s_fetch_id) return;
+          // On failure the key is left out so the watch keeps the alert it has.
+          if (err) {
+            console.log('Row ' + (row + 1) + ' alerts fetch failed: ' + err.message);
+          } else if (sameRow(cfg, rowConfig(row, savedSettings()))) {
+            dict[keys.ALERT + row] = text;
+            if (text) console.log('Row ' + (row + 1) + ' alert: ' + text);
+          }
+          done();
+        });
+      } else {
+        dict[keys.ALERT + row] = '';
+      }
       var fetch = isCommuterRail(cfg.route) ? fetchCommuterRail : fetchSubway;
       fetch(cfg, function(err, result) {
+        // A late reply from an abandoned fetch must not disturb its replacement.
+        if (fetchId !== s_fetch_id) return;
         if (err) {
           console.log('Row ' + (row + 1) + ' (' + cfg.route + ' ' + cfg.stop + ') fetch failed: ' +
                       err.message);
+          failed++;
         } else if (sameRow(cfg, rowConfig(row, savedSettings()))) {
           putRow(dict, row, result);
         }
@@ -405,6 +546,7 @@ Pebble.addEventListener('webviewclosed', function(e) {
     delete settings[keys.ROUTE + row];
     delete settings[keys.STOP + row];
     delete settings[keys.DIR + row];
+    delete settings[keys.ALERT_ON + row];
     if (!sameRow(rowConfig(row, before), rowConfig(row, after))) {
       putRow(cleared, row, { mode: MODE_MINUTES, trains: [] });
     }
@@ -418,9 +560,54 @@ Pebble.addEventListener('webviewclosed', function(e) {
 
 Pebble.addEventListener('ready', function() {
   console.log('PebbleKit JS ready');
+  logDiagHistory();
   refresh();
 });
 
-Pebble.addEventListener('appmessage', function() {
-  refresh();
+// Breadcrumbs the watch reports about its previous run (see prv_diag_init in
+// src/c/watchface.c). Kept on the phone so they survive a watch reset and can
+// be read from `pebble logs` whenever it is next attached.
+var DIAG_HISTORY_KEY = 'diag-history';
+var DIAG_HISTORY_MAX = 20;
+
+function diagHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(DIAG_HISTORY_KEY)) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function recordDiag(text) {
+  var history = diagHistory();
+  history.push({ t: new Date().toISOString(), d: String(text) });
+  history = history.slice(-DIAG_HISTORY_MAX);
+  localStorage.setItem(DIAG_HISTORY_KEY, JSON.stringify(history));
+  console.log('WATCH DIAG ' + text);
+}
+
+function logDiagHistory() {
+  var history = diagHistory();
+  console.log('DIAG HISTORY ' + history.length + ' entries');
+  history.forEach(function(entry) {
+    console.log('DIAG ' + entry.t + ' ' + entry.d);
+  });
+}
+
+Pebble.addEventListener('appmessage', function(e) {
+  var payload = (e && e.payload) || {};
+  if (payload.DIAG) {
+    recordDiag(payload.DIAG);
+  }
+  if (payload.REQUEST || !payload.DIAG) {
+    refresh();
+  }
 });
+
+// Exposed for tests.
+if (typeof module !== 'undefined') {
+  module.exports = {
+    serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
+    alertText: alertText, alertApplies: alertApplies
+  };
+}

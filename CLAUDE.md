@@ -92,7 +92,20 @@ Key Entry Points:
 - https://developer.repebble.com/guides/events-and-services/buttons - Button handling
 - https://developer.repebble.com/guides/user-interfaces/layers - UI foundations
 
+## Versioning
+
+The `version` in `package.json` is what the Pebble phone app shows for the watchface, so it identifies the build on the watch.
+
+- Format is `major.minor.patch`, digits only (no `-beta` style suffixes; the build fails). Major and minor must each be 0-255. Patch can be any whole number, but only major and minor are stored in the watch binary, so do not rely on patch on the watch side.
+- `main` is `0.0.x`. Each new branch takes the next minor (`claude/pebble-dev-tools-setup-ghhvea` is `0.1.x`) and starts at patch 0.
+- Raise the patch (`make bump`) for every build that is installed on the watch for the user to look at, before the install, so each install shows a new number. Say the version in the message that asks the user to open the app.
+- After the user confirms a version, tag its commit `v<version>` and push the tag with the branch.
+
 ## Development Best Practices
+
+- Before every commit, install the build on the user's real watch: start `make watch` in the background (it waits up to 5 minutes for the phone), tell the user in the same turn to open the Pebble app on their phone, and commit only after `App install succeeded.` Do not ask whether the app is open and wait for a reply. See the `pebble-vm-dev` skill.
+- Do not `git push` a change until it has been installed on the watch and the user has confirmed it looks right there. Commit locally after the install succeeds, then wait for the user's confirmation before pushing. If they ask for adjustments, make them, reinstall, and wait again.
+- Changes that do not affect the build (documentation, `CLAUDE.md`, skills, the Makefile) have nothing to install or confirm, so commit and push them directly.
 
 - Whenever making changes, run `pebble screenshot --scale 6` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
 

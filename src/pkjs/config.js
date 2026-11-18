@@ -78,6 +78,14 @@ function rowSection(row, i, saved) {
       },
       {
         type: 'toggle',
+        messageKey: 'ALERT_ON[' + i + ']',
+        label: 'Show service alerts',
+        description: 'Scrolls the MBTA alert for this line and station across the ' +
+                     'label once a minute. Minor notices are left out.',
+        defaultValue: false
+      },
+      {
+        type: 'toggle',
         messageKey: 'WARN_ON[' + i + ']',
         label: 'Departure warning',
         defaultValue: row.warn.enabled

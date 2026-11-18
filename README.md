@@ -34,6 +34,11 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
 - **Label on watch** per row, filled in automatically (e.g. `SALEM > IN`) when
   you change the station or direction, and editable. If it doesn't fit next to
   the countdown, the watch shortens the station part.
+- **Show service alerts** per row (off by default): when the MBTA has an alert
+  in effect for that line, station and direction, its text scrolls across the
+  row's label once a minute and `!` is shown before the label in between.
+  Minor notices (severity below 3) are left out. If the watch ever resets
+  during a scroll, alerts stay off until the settings are saved again.
 - **Departure warning** per row: while a departure is inside its range it
   blinks (inverted), blinking faster as the end of the range approaches — a
   cue that it's time to leave. Defaults: row 1 on, 30 → 25 min; row 2
@@ -45,6 +50,9 @@ every 2 minutes; set `MBTA_API_KEY` in `src/pkjs/index.js` for a higher
 rate limit.
 
 ## Building & running
+
+`make` lists shortcuts for the commands below (`make emu`, `make shot`,
+`make watch`, ...).
 
 ```sh
 pebble build                          # build for all targetPlatforms
