@@ -9,6 +9,27 @@
 #define REFRESH_MINUTES 2
 #define PERSIST_KEY_DATA 1
 #define PERSIST_KEY_SETTINGS 2
+#define PERSIST_KEY_DIAG 3
+
+// Diagnostics. A breadcrumb in persistent storage records what the app was
+// doing, so that after a crash or a watch reset the next launch can report it
+// to the phone (and to `pebble logs`). The live state goes out once a minute as
+// a heartbeat log line.
+#define DIAG_VERSION 1
+#define DIAG_PERSIST_MINUTES 10
+enum { STAGE_INIT, STAGE_RUNNING };
+
+typedef struct {
+  uint32_t launches;
+  uint32_t started;
+  uint32_t updated;
+  uint16_t max_draw_ms;
+  uint16_t heap_free;
+  uint8_t stage;
+  uint8_t detail;
+  uint8_t clean_exit;
+  uint8_t version;
+} Diag;
 
 #define TIME_HEIGHT 45
 #define HEADER_HEIGHT 15
@@ -113,6 +134,11 @@ static FetchState s_fetch_state;
 static AppTimer *s_fetch_timer;
 static int s_fetch_ticks;
 static time_t s_last_request;
+static Diag s_diag;
+// The previous run's breadcrumb as text, until the phone has received it.
+static char s_prev_diag[80];
+static bool s_prev_diag_pending;
+static uint16_t s_max_draw_ms;
 static char s_time_buffer[8];
 static AppTimer *s_blink_timer;
 static BlinkState s_blink[NUM_SECTIONS];
@@ -452,7 +478,59 @@ static void prv_draw_row(GContext *ctx, int row_y, int width, int section, const
   }
 }
 
+static uint16_t prv_cap16(int32_t v) {
+  return v < 0 ? 0 : v > 65535 ? 65535 : (uint16_t)v;
+}
+
+// Records what the app is doing. Written to flash, so only called on a change
+// of stage and every DIAG_PERSIST_MINUTES.
+static void prv_breadcrumb(uint8_t stage, uint8_t detail) {
+  s_diag.stage = stage;
+  s_diag.detail = detail;
+  s_diag.updated = (uint32_t)time(NULL);
+  if (s_max_draw_ms > s_diag.max_draw_ms) {
+    s_diag.max_draw_ms = s_max_draw_ms;
+  }
+  s_diag.heap_free = prv_cap16((int32_t)heap_bytes_free());
+  persist_write_data(PERSIST_KEY_DIAG, &s_diag, sizeof(s_diag));
+}
+
+// Reads the previous run's breadcrumb and starts this run's.
+static void prv_diag_init(void) {
+  Diag prev;
+  uint32_t launches = 0;
+  if (persist_read_data(PERSIST_KEY_DIAG, &prev, sizeof(prev)) == (int)sizeof(prev) &&
+      prev.version == DIAG_VERSION) {
+    launches = prev.launches;
+    snprintf(s_prev_diag, sizeof(s_prev_diag),
+             "prev %s stage=%d.%d ran=%lds draw=%dms heap=%d launch=%lu",
+             prev.clean_exit ? "clean" : "UNCLEAN", prev.stage, prev.detail,
+             (long)(prev.updated - prev.started), prev.max_draw_ms, prev.heap_free,
+             (unsigned long)prev.launches);
+    s_prev_diag_pending = true;
+    APP_LOG(APP_LOG_LEVEL_INFO, "%s", s_prev_diag);
+  }
+  s_diag = (Diag) {
+    .launches = launches + 1,
+    .started = (uint32_t)time(NULL),
+    .version = DIAG_VERSION,
+  };
+  prv_breadcrumb(STAGE_INIT, 0);
+}
+
+static void prv_canvas_draw(Layer *layer, GContext *ctx);
+
+// Times each redraw; the slowest since the last heartbeat is reported.
 static void prv_canvas_update(Layer *layer, GContext *ctx) {
+  int64_t start_ms = prv_now_ms();
+  prv_canvas_draw(layer, ctx);
+  uint16_t took = prv_cap16((int32_t)(prv_now_ms() - start_ms));
+  if (took > s_max_draw_ms) {
+    s_max_draw_ms = took;
+  }
+}
+
+static void prv_canvas_draw(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   int width = bounds.size.w;
   time_t now = time(NULL);
@@ -714,7 +792,27 @@ static void prv_request_update(void) {
 }
 
 static void prv_outbox_failed(DictionaryIterator *iter, AppMessageResult reason, void *context) {
-  prv_set_fetch_state(FETCH_FAILED);
+  APP_LOG(APP_LOG_LEVEL_WARNING, "outbox failed reason=%d", (int)reason);
+  // Only a failed departure request fails the fetch, not a failed diagnostic.
+  if (dict_find(iter, MESSAGE_KEY_REQUEST)) {
+    prv_set_fetch_state(FETCH_FAILED);
+  }
+}
+
+static void prv_outbox_sent(DictionaryIterator *iter, void *context) {
+  if (dict_find(iter, MESSAGE_KEY_DIAG)) {
+    s_prev_diag_pending = false;
+  }
+}
+
+// Sends the previous run's breadcrumb to the phone, which logs and keeps it.
+static void prv_send_prev_diag(void) {
+  DictionaryIterator *iter;
+  if (!s_prev_diag_pending || app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    return;
+  }
+  dict_write_cstring(iter, MESSAGE_KEY_DIAG, s_prev_diag);
+  app_message_outbox_send();
 }
 
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
@@ -760,6 +858,9 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     prv_set_fetch_state(prv_tuple_int(failed) > 0 ? FETCH_FAILED : FETCH_OK);
   }
 
+  // The phone is reachable right now, so report the previous run if still owed.
+  prv_send_prev_diag();
+
   bool settings_changed = prv_read_settings(iter);
   if (changed || settings_changed) {
     layer_mark_dirty(s_canvas);
@@ -774,6 +875,13 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   // The handler also runs whenever the phone sets the watch's clock, so the
   // time since the last request is checked too.
   time_t now = time(NULL);
+  APP_LOG(APP_LOG_LEVEL_INFO, "hb up=%lds heap=%d draw=%dms fetch=%d bt=%d",
+          (long)(now - (time_t)s_diag.started), (int)heap_bytes_free(), s_max_draw_ms,
+          (int)s_fetch_state, (int)s_connected);
+  if (s_diag.stage == STAGE_INIT || tick_time->tm_min % DIAG_PERSIST_MINUTES == 0) {
+    prv_breadcrumb(STAGE_RUNNING, 0);
+  }
+  s_max_draw_ms = 0;
   if (tick_time->tm_min % REFRESH_MINUTES == 0 && now - s_last_request >= 60) {
     s_last_request = now;
     prv_request_update();
@@ -803,6 +911,7 @@ static void prv_window_unload(Window *window) {
 }
 
 static void prv_init(void) {
+  prv_diag_init();
   prv_load_settings();
 
   s_time_font = fonts_get_system_font(FONT_KEY_LECO_36_BOLD_NUMBERS);
@@ -841,7 +950,8 @@ static void prv_init(void) {
 
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_outbox_failed(prv_outbox_failed);
-  app_message_open(512, 64);
+  app_message_register_outbox_sent(prv_outbox_sent);
+  app_message_open(512, 128);
 
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
   connection_service_subscribe((ConnectionHandlers) {
@@ -853,6 +963,8 @@ static void prv_init(void) {
 }
 
 static void prv_deinit(void) {
+  s_diag.clean_exit = 1;
+  prv_breadcrumb(s_diag.stage, s_diag.detail);
   if (s_blink_timer) {
     app_timer_cancel(s_blink_timer);
   }

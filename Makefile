@@ -14,7 +14,7 @@ LOG := build/make.log
 # to a file instead of the terminal.
 QUIET := >$(LOG) 2>&1 </dev/null
 
-.PHONY: help setup build clean emu shot config logs kill wipe login status watch watch-logs
+.PHONY: help setup build clean emu shot config logs kill wipe login status watch watch-logs watch-capture
 
 help: ## List the shortcuts
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -60,3 +60,6 @@ watch: build ## Install on the real watch (waits 5 min for the Pebble app on you
 
 watch-logs: ## Stream logs from the real watch and phone (Ctrl-C to stop)
 	pebble logs --cloudpebble
+
+watch-capture: ## Capture watch logs to build/watch-logs.txt, reconnecting (MINUTES=110)
+	scripts/watch-logs.sh $(or $(MINUTES),110) build/watch-logs.txt

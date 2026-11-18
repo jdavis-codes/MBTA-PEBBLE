@@ -284,7 +284,12 @@ function sendToWatch(dict, retries, what) {
   });
 }
 
+var s_refreshes = 0;
+
 function refresh() {
+  // Every tenth refresh (about 20 minutes) the history is logged again, so a
+  // log capture attached at any time sees it without the app restarting.
+  if (++s_refreshes % 10 === 0) logDiagHistory();
   if (s_fetching) {
     if (Date.now() - s_fetch_started < FETCH_HUNG_MS) {
       s_refetch = true;
@@ -352,11 +357,48 @@ Pebble.addEventListener('webviewclosed', function(e) {
 
 Pebble.addEventListener('ready', function() {
   console.log('PebbleKit JS ready');
+  logDiagHistory();
   refresh();
 });
 
-Pebble.addEventListener('appmessage', function() {
-  refresh();
+// Breadcrumbs the watch reports about its previous run (see prv_diag_init in
+// src/c/watchface.c). Kept on the phone so they survive a watch reset and can
+// be read from `pebble logs` whenever it is next attached.
+var DIAG_HISTORY_KEY = 'diag-history';
+var DIAG_HISTORY_MAX = 20;
+
+function diagHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(DIAG_HISTORY_KEY)) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function recordDiag(text) {
+  var history = diagHistory();
+  history.push({ t: new Date().toISOString(), d: String(text) });
+  history = history.slice(-DIAG_HISTORY_MAX);
+  localStorage.setItem(DIAG_HISTORY_KEY, JSON.stringify(history));
+  console.log('WATCH DIAG ' + text);
+}
+
+function logDiagHistory() {
+  var history = diagHistory();
+  console.log('DIAG HISTORY ' + history.length + ' entries');
+  history.forEach(function(entry) {
+    console.log('DIAG ' + entry.t + ' ' + entry.d);
+  });
+}
+
+Pebble.addEventListener('appmessage', function(e) {
+  var payload = (e && e.payload) || {};
+  if (payload.DIAG) {
+    recordDiag(payload.DIAG);
+  }
+  if (payload.REQUEST || !payload.DIAG) {
+    refresh();
+  }
 });
 
 // Exposed for tests.

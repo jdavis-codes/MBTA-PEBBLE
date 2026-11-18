@@ -38,7 +38,8 @@
       "WARN_END[3]",
       "DEPARTURES",
       "FETCH_FAILED",
-      "FLAGS[3]"
+      "FLAGS[3]",
+      "DIAG"
     ],
     "resources": {
       "media": []
