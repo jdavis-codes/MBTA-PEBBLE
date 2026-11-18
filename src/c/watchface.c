@@ -112,6 +112,7 @@ static bool s_connected;
 static FetchState s_fetch_state;
 static AppTimer *s_fetch_timer;
 static int s_fetch_ticks;
+static time_t s_last_request;
 static char s_time_buffer[8];
 static AppTimer *s_blink_timer;
 static BlinkState s_blink[NUM_SECTIONS];
@@ -457,8 +458,9 @@ static void prv_canvas_update(Layer *layer, GContext *ctx) {
   time_t now = time(NULL);
   int64_t now_ms = prv_now_ms();
 
-  Cell cells[NUM_SECTIONS][MAX_DEPARTURES];
-  int counts[NUM_SECTIONS];
+  // Static: the app stack is only about 2KB, and the text drawing below needs most of it.
+  static Cell cells[NUM_SECTIONS][MAX_DEPARTURES];
+  static int counts[NUM_SECTIONS];
   for (int section = 0; section < NUM_SECTIONS; section++) {
     counts[section] = prv_build_cells(section, now, cells[section]);
   }
@@ -769,7 +771,11 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   prv_update_time_string(tick_time);
   layer_mark_dirty(s_canvas);
   prv_update_blink();
-  if (tick_time->tm_min % REFRESH_MINUTES == 0) {
+  // The handler also runs whenever the phone sets the watch's clock, so the
+  // time since the last request is checked too.
+  time_t now = time(NULL);
+  if (tick_time->tm_min % REFRESH_MINUTES == 0 && now - s_last_request >= 60) {
+    s_last_request = now;
     prv_request_update();
   }
 }
