@@ -1,3 +1,5 @@
 /.DS_Store
 /.cursor
 /build
+/.lock-waf*
+/.lock-waf*

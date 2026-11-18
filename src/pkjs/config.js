@@ -29,9 +29,17 @@ var ROWS = [
 function selectOptions(fallback, saved) {
   var options = [fallback];
   if (saved && saved !== fallback.value) {
-    options.unshift({ value: saved, label: saved });
+    options.unshift({ value: saved, label: savedLabel(saved) });
   }
   return options;
+}
+
+// Names a saved value that the MBTA lists would otherwise label with its raw id.
+function savedLabel(saved) {
+  if (/^Green-[A-Z](,Green-[A-Z])+$/.test(saved)) return 'Green Line';
+  var endpoint = /^0:(.+)$/.exec(saved);
+  if (endpoint) return 'Outbound → ' + endpoint[1] + ' only';
+  return saved;
 }
 
 function rowSection(row, i, saved) {

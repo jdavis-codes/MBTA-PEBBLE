@@ -13,6 +13,11 @@ Commuter rail rows show departure times. Subway rows show minutes until each
 train, tagged with the first letter of its destination when trains in that
 direction go to different places (e.g. `A` = Ashmont, `B` = Braintree).
 
+The Green Line is offered as a single line covering the B, C, D and E branches.
+Its stations are grouped into the shared central stops and each branch's own
+stops, and departures are tagged with their branch letter (e.g. `12B 15D`)
+wherever more than one branch stops.
+
 ### Settings
 
 Open the settings page (via [Clay](https://github.com/pebble-dev/clay), defined

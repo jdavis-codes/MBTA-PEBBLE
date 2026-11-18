@@ -16,6 +16,33 @@ module.exports = function() {
     [/\bBoulevard\b/g, 'Blvd'], [/\bUniversity\b/g, 'Univ']
   ];
 
+  // The Green Line branches are separate MBTA routes; they're offered as one line
+  // whose value is the comma-separated route list the API accepts as a filter.
+  var GREEN_PREFIX = 'Green-';
+  var GREEN_ID = 'Green-B,Green-C,Green-D,Green-E';
+
+  // Outbound terminals of commuter rail lines that split into several branches.
+  // name is shown in the dropdown and matched to trip headsigns in index.js;
+  // code is what the watch shows in the label.
+  var COMMUTER_ENDPOINTS = {
+    'CR-Newburyport': [{ name: 'Newburyport', code: 'NEWB' }, { name: 'Rockport', code: 'ROCK' }],
+    'CR-Fitchburg': [{ name: 'Wachusett', code: 'WACH' }, { name: 'Littleton/Route 495', code: 'LITT' }],
+    'CR-Haverhill': [{ name: 'Haverhill', code: 'HAVR' }, { name: 'Reading', code: 'READ' }],
+    'CR-Franklin': [
+      { name: 'Forge Park/495', code: 'FORG' }, { name: 'Foxboro', code: 'FOXB' },
+      { name: 'Providence', code: 'PROV' }
+    ],
+    'CR-Providence': [
+      { name: 'Stoughton', code: 'STOU' }, { name: 'Wickford Junction', code: 'WICK' },
+      { name: 'Providence', code: 'PROV' }
+    ],
+    'CR-NewBedford': [{ name: 'New Bedford', code: 'NBED' }, { name: 'Fall River', code: 'FALL' }],
+    'CR-Kingston': [
+      { name: 'Kingston', code: 'KING' }, { name: 'New Bedford', code: 'NBED' },
+      { name: 'Fall River', code: 'FALL' }
+    ]
+  };
+
   var routes = {};
   var stopsByRoute = {};
   // Set while options are replaced in code so listeners can ignore those changes.
@@ -97,36 +124,68 @@ module.exports = function() {
     return option ? option.textContent : '';
   }
 
+  // The short code for an endpoint; unknown names are cut down to four letters.
+  function endpointCode(routeId, name) {
+    var endpoints = COMMUTER_ENDPOINTS[routeId] || [];
+    for (var i = 0; i < endpoints.length; i++) {
+      if (endpoints[i].name === name) return endpoints[i].code;
+    }
+    return name.substring(0, 4).toUpperCase();
+  }
+
   function updateLabel(row) {
-    var route = routes[rowItem('ROUTE', row).get()];
+    var routeId = rowItem('ROUTE', row).get();
+    var route = routes[routeId];
     var stopName = selectedText(rowItem('STOP', row));
     if (!route || !stopName) return;
     ABBREVIATIONS.forEach(function(a) {
       stopName = stopName.replace(a[0], a[1]);
     });
-    var dirName = route.direction_names[rowItem('DIR', row).get()] || '';
+    // A direction value is "0", or "0:<endpoint name>" for a single endpoint.
+    var parts = rowItem('DIR', row).get().split(':');
+    var isEndpoint = parts.length > 1;
+    var dirName = route.direction_names[parts[0]] || '';
     var dir = dirName === 'Outbound' ? 'OUT' : dirName === 'Inbound' ? 'IN' : dirName;
+    if (isEndpoint) dir = endpointCode(routeId, parts.slice(1).join(':'));
     // Keep labels short enough to sit beside the countdown in the watch header:
-    // shorten the direction first, then the station name.
-    if (stopName.length + 3 + dir.length > LABEL_FIT) {
+    // shorten the direction first, then the station name. Endpoint codes stay whole.
+    if (!isEndpoint && stopName.length + 3 + dir.length > LABEL_FIT) {
       dir = dir.length > 3 ? dir.charAt(0) : dir;
     }
     stopName = stopName.substring(0, Math.max(LABEL_FIT - 3 - dir.length, 4)).trim();
     rowItem('LABEL', row).set((stopName + ' > ' + dir).toUpperCase().substring(0, LABEL_MAX));
   }
 
-  function directionOptions(route) {
-    return [0, 1].map(function(d) {
-      return {
-        value: String(d),
-        label: route.direction_names[d] + ' → ' + route.direction_destinations[d]
-      };
+  // Outbound gets an extra option per endpoint so a row can show just one branch.
+  function directionOptions(routeId, route) {
+    var options = [{
+      value: '0',
+      label: route.direction_names[0] + ' → ' + route.direction_destinations[0]
+    }];
+    (COMMUTER_ENDPOINTS[routeId] || []).forEach(function(endpoint) {
+      options.push({
+        value: '0:' + endpoint.name,
+        label: route.direction_names[0] + ' → ' + endpoint.name + ' only'
+      });
     });
+    options.push({
+      value: '1',
+      label: route.direction_names[1] + ' → ' + route.direction_destinations[1]
+    });
+    return options;
+  }
+
+  function isGreenBranch(routeId) {
+    return routeId.indexOf(GREEN_PREFIX) === 0 && routeId.indexOf(',') < 0;
   }
 
   function loadStops(routeId, callback) {
     if (stopsByRoute[routeId]) {
       callback(stopsByRoute[routeId]);
+      return;
+    }
+    if (routeId.indexOf(',') >= 0) {
+      loadMergedStops(routeId, callback);
       return;
     }
     apiGet('/stops?filter[route]=' + encodeURIComponent(routeId) +
@@ -140,12 +199,74 @@ module.exports = function() {
     });
   }
 
+  // Stations of a merged line: stops served by several branches first, in line
+  // order, then a group for each branch's own stops.
+  function loadMergedStops(routeId, callback) {
+    var branchIds = routeId.split(',');
+    var lists = [];
+    var pending = branchIds.length;
+    var failed = false;
+    branchIds.forEach(function(branchId, i) {
+      loadStops(branchId, function(stops) {
+        if (!stops) failed = true;
+        lists[i] = stops || [];
+        if (--pending > 0) return;
+        if (failed) {
+          callback(null);
+          return;
+        }
+        var count = {};
+        lists.forEach(function(list) {
+          list.forEach(function(s) { count[s.value] = (count[s.value] || 0) + 1; });
+        });
+        // Interleave the branches' shared stops, keeping each branch's order.
+        var shared = [];
+        lists.forEach(function(list) {
+          var prev = -1;
+          list.forEach(function(s) {
+            if (count[s.value] < 2) return;
+            var at = -1;
+            for (var j = 0; j < shared.length; j++) {
+              if (shared[j].value === s.value) at = j;
+            }
+            if (at < 0) {
+              at = prev + 1;
+              shared.splice(at, 0, s);
+            }
+            prev = at;
+          });
+        });
+        var groups = [{ label: 'Shared', options: shared }];
+        lists.forEach(function(list, j) {
+          var own = list.filter(function(s) { return count[s.value] < 2; });
+          var letter = branchIds[j].substring(GREEN_PREFIX.length);
+          if (own.length) groups.push({ label: letter + ' branch', options: own });
+        });
+        stopsByRoute[routeId] = groups;
+        callback(groups);
+      });
+    });
+  }
+
+  // Combines several routes' details into one line, e.g. the Green Line branches.
+  // Listing every branch's terminus wraps badly in the select, so destinations
+  // are summarised.
+  function mergeRoutes(ids, label) {
+    var first = routes[ids[0]];
+    return {
+      long_name: label,
+      type: first.type,
+      direction_names: first.direction_names,
+      direction_destinations: ['all branches', 'all branches']
+    };
+  }
+
   // Refreshes a row's direction and station lists for its current line.
   function onRouteChanged(row, byUser) {
     var routeId = rowItem('ROUTE', row).get();
     var route = routes[routeId];
     if (!route) return;
-    setOptions(rowItem('DIR', row), directionOptions(route), rowItem('DIR', row).get());
+    setOptions(rowItem('DIR', row), directionOptions(routeId, route), rowItem('DIR', row).get());
     loadStops(routeId, function(stops) {
       // Ignore results for a line the user has already switched away from.
       if (rowItem('ROUTE', row).get() !== routeId) return;
@@ -182,17 +303,35 @@ module.exports = function() {
       }
       var subway = [];
       var commuter = [];
+      var greenIds = [];
       data.forEach(function(r) {
         routes[r.id] = r.attributes;
+        if (isGreenBranch(r.id)) {
+          greenIds.push(r.id);
+          if (greenIds.length > 1) return;
+          r = { id: GREEN_ID, attributes: { long_name: 'Green Line', type: r.attributes.type } };
+        }
         (r.attributes.type === 2 ? commuter : subway)
           .push({ value: r.id, label: r.attributes.long_name });
       });
+      if (greenIds.length) {
+        // Keep the value in step with the branches the API actually lists.
+        var mergedId = greenIds.join(',');
+        subway.forEach(function(o) {
+          if (o.value === GREEN_ID) o.value = mergedId;
+        });
+        GREEN_ID = mergedId;
+        routes[GREEN_ID] = mergeRoutes(greenIds, 'Green Line');
+      }
       var groups = [
         { label: 'Subway', options: subway },
         { label: 'Commuter Rail', options: commuter }
       ];
       for (var row = 0; row < NUM_ROWS; row++) {
-        setOptions(rowItem('ROUTE', row), groups, rowItem('ROUTE', row).get());
+        var saved = rowItem('ROUTE', row).get();
+        // Rows saved on a single branch move to the merged line, keeping their station.
+        if (isGreenBranch(saved)) saved = GREEN_ID;
+        setOptions(rowItem('ROUTE', row), groups, saved);
         onRouteChanged(row, false);
       }
       setStatus('');
