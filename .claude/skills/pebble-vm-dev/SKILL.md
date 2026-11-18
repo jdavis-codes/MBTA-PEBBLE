@@ -120,25 +120,31 @@ logs from the watch and the phone-side JavaScript the same way.
 
 ## 6. Writing the C
 
-- **The emulator does not prove a build is safe on the watch.** A scrolling
-  service-alert header (first an `AppTimer` loop at 60ms, then a
-  `PropertyAnimation` on a clipped `TextLayer`) ran clean on both emulator
-  platforms and took down the real watch twice, about 10 seconds into a
-  scroll, badly enough to need an OS reinstall. The cause was never
-  confirmed; the leading guess is that many seconds of back-to-back
-  full-screen redraws starve the system on real hardware. The feature was
-  removed. Until that is understood:
-  - Do not add any animation that redraws continuously for more than a
-    second or two. The departure blink (one redraw per 125ms or slower) and
-    the fetch pulse (150ms, normally a few seconds) are the only animations
-    known to be fine on hardware.
-  - Treat anything that animates, or that changes how often the screen
-    redraws, as needing the user's explicit go-ahead before it is installed
-    on the watch, and say plainly that it is untested on hardware.
+- **The emulator does not prove a build is safe on the watch.** Two scrolling
+  alert headers (an `AppTimer` loop at 60ms, then a `PropertyAnimation` on a
+  clipped `TextLayer`) ran clean on both emulator platforms and reset the real
+  watch about 10 seconds into a scroll, twice needing an OS reinstall. The
+  cause was never found. A third version works on the watch; it differs by
+  leaving an idle gap after every frame, taking its position from the clock,
+  drawing only whole characters that lie fully inside the label area (never a
+  wide text box, never text partly off-screen), and caching the row layout.
+  Keep those properties when touching the scroll.
+  - Anything that animates, or changes how often the screen redraws, needs
+    the user's explicit go-ahead before it is installed, with a plain
+    statement that it is untested on hardware.
   - If the watch misbehaves after an install, stop installing, restore the
     last build the user confirmed, and tell them to keep the app off the
     watch until then: the phone reinstalls it, and saved settings can
     re-trigger the same fault.
+- **Diagnostics are built in; use them.** The watch keeps a breadcrumb in
+  persistent storage and reports how the previous run ended at the next
+  launch (`prev clean|UNCLEAN stage=...`); the phone keeps the last 20 reports
+  and replays them into the logs at launch and every 20 minutes. A heartbeat
+  line each minute carries uptime, free heap and the slowest redraw. Capture
+  with `make watch-capture` (reconnects when the phone drops, writes
+  `build/watch-logs.txt`), and stop the capture before running `make watch`.
+  A run that dies mid-scroll leaves alerts blocked until the settings are
+  saved again. Add a breadcrumb stage for any new risky feature.
 - **Look for the documented way first.** Before hand-rolling UI behaviour,
   check the guides (`/llms.txt`) for a system facility.
 - **The app stack is about 2KB.** Text drawing uses much of it, so keep

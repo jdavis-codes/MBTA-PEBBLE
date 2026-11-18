@@ -14,7 +14,7 @@ LOG := build/make.log
 # to a file instead of the terminal.
 QUIET := >$(LOG) 2>&1 </dev/null
 
-.PHONY: help setup build clean emu shot config logs kill wipe login status watch watch-logs watch-capture
+.PHONY: help setup build clean emu shot config logs kill wipe login status watch watch-logs watch-capture bump version
 
 help: ## List the shortcuts
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -60,6 +60,12 @@ watch: build ## Install on the real watch (waits 5 min for the Pebble app on you
 
 watch-logs: ## Stream logs from the real watch and phone (Ctrl-C to stop)
 	pebble logs --cloudpebble
+
+bump: ## Raise the patch version in package.json (0.1.3 -> 0.1.4)
+	@node -e 'const fs=require("fs"),f="package.json",s=fs.readFileSync(f,"utf8");const m=/"version": "(\d+)\.(\d+)\.(\d+)"/.exec(s);if(!m)throw new Error("no version");const v=m[1]+"."+m[2]+"."+(+m[3]+1);fs.writeFileSync(f,s.replace(m[0],"\"version\": \""+v+"\""));console.log(m[1]+"."+m[2]+"."+m[3]+" -> "+v)'
+
+version: ## Show the version in package.json
+	@node -p 'require("./package.json").version'
 
 watch-capture: ## Capture watch logs to build/watch-logs.txt, reconnecting (MINUTES=110)
 	scripts/watch-logs.sh $(or $(MINUTES),110) build/watch-logs.txt
