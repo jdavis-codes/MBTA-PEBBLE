@@ -1,0 +1,73 @@
+<!doctype html><meta charset="utf-8">
+<!-- Source for watch-guide.png. watch-screen.png is a 144x168 capture of the
+     watch. Render #c with a headless browser at 2000px wide to regenerate. -->
+<style>
+body{margin:0;background:#fff;font-family:"DejaVu Sans","Liberation Sans",sans-serif;color:#111}
+#c{position:relative;width:2000px;background:#fff}
+#w{position:absolute;image-rendering:pixelated;border:8px solid #111;border-radius:12px;margin:-8px}
+svg{position:absolute;left:0;top:0}
+.t{position:absolute;width:470px;font-size:19px;line-height:1.32}
+.t b{display:block;font-size:22px;margin-bottom:3px}
+.l{left:20px;text-align:right}.r{left:1510px}
+</style>
+<div id="c"><img id="w" src="watch-screen.png"><svg id="s" width="2000"></svg></div>
+<script>
+var K=6,X0=568,Y0=180,LX=504,RX=1496,GAP=16;
+function px(x){return X0+x*K} function py(y){return Y0+y*K}
+// Targets are in watch pixels: box [x1,y1,x2,y2] or circ [cx,cy,r].
+// top: the arrow runs across the top margin and drops onto the target.
+// at: [x,y] watch pixel the arrow should end at instead of the nearest edge.
+var items=[
+ {side:'l',top:1,title:'Bluebikes docks',body:'Each circle is a pie chart for one Bluebikes dock, chosen in the watchface settings. The solid slice is the share of dock slots holding a bike. Orbiting dots are available e-bikes, one dot each.',box:[1,-1.5,39,11]},
+ {side:'l',title:'Bike dock nearly full',body:'A hollow square means almost full: one free parking space.<br>A solid square means completely full: no free parking space.',box:[40.5,-1.5,65,11],at:[47,11.8],ty:300},
+ {side:'l',title:'Train timetable header',body:'Station &gt; direction. The line, station and direction are configured in the watchface settings. This example shows commuter rail rows, which display departure times as HH:MM. The watch here is set to a 24-hour clock (military time).',box:[1,45.5,106,58.5]},
+ {side:'l',title:'Blinking departure warning',body:'If enabled in the watchface settings, a train time blinks when it is time to head to the station. The blink starts slow at your maximum time to leave, speeds up until your minimum time to leave, then stops.',box:[0.5,60.5,47.5,85.5]},
+ {side:'l',title:'Service alert',body:'An “!” means an alert is posted for this line. If alerts are enabled for the row, the alert text scrolls across the header every minute.',circ:[4,92.5,5.5]},
+ {side:'l',title:'Canceled train',body:'An X marks a canceled train. Only shown for commuter rail: subway trains are regularly canceled and rescheduled.',box:[0.5,101.5,48,126]},
+ {side:'l',title:'Subway timetables',body:'Subway trains depart frequently, so they are shown as minutes to departure.',box:[11.5,145,35,164.5]},
+ {side:'r',top:1,title:'Data connection',body:'Solid circle: data is up to date.<br>Pulsing: downloading (timetables every 2 minutes, bike docks every minute).<br>X: the last download failed.',circ:[126.5,6,5]},
+ {side:'r',title:'Phone connection',body:'Filled: Bluetooth connection stable.<br>Hollow: lost Bluetooth connection.',circ:[137.5,6,5],ty:290},
+ {side:'r',title:'Departure countdown',body:'Minutes until the next train departs.',box:[117,45.5,143,58.5]},
+ {side:'r',title:'Delayed trains',body:'If a train is marked delayed (3 minutes or more behind schedule), the background is hatched. The time shown is the new estimated departure.',box:[96.5,60.5,143.5,85.5]},
+ {side:'r',title:'End of service',body:'Shows when no more trains are scheduled for the rest of the service day. The MBTA’s service day runs until about 3 am.',box:[52,104,143.5,123]},
+ {side:'r',title:'Subway destination letter',body:'Shown where a line splits.<br>Red Line southbound: A = Ashmont, B = Braintree.<br>Green Line: B = Boston College, C = Cleveland Circle, D = Riverside, E = Heath Street.<br>Other lines have no letter.',circ:[131,155.5,6.5]}
+];
+var R='#e3121b',c=document.getElementById('c'),w=document.getElementById('w');
+w.style.left=X0+'px';w.style.top=Y0+'px';w.style.width=144*K+'px';w.style.height=168*K+'px';
+items.forEach(function(it){
+  if(it.box) it.b={x1:px(it.box[0]),y1:py(it.box[1]),x2:px(it.box[2]),y2:py(it.box[3])};
+  else{var r=it.circ[2]*K;it.b={x1:px(it.circ[0])-r,y1:py(it.circ[1])-r,x2:px(it.circ[0])+r,y2:py(it.circ[1])+r,c:1};}
+  it.el=document.createElement('div');it.el.className='t '+it.side;
+  it.el.innerHTML='<b>'+it.title+'</b>'+it.body;c.appendChild(it.el);
+  it.h=it.el.offsetHeight;
+  it.want=it.top?it.h/2+16:(it.ty||(it.b.y1+it.b.y2)/2);
+});
+var H=Y0+168*K+40;
+['l','r'].forEach(function(side){
+  var col=items.filter(function(i){return i.side===side}).sort(function(a,b){return a.want-b.want});
+  col.forEach(function(it,i){
+    it.y=it.want;
+    if(i>0){var p=col[i-1],min=p.y+p.h/2+GAP+it.h/2;if(it.y<min)it.y=min;}
+  });
+  for(var i=col.length-1;i>=0;i--){
+    var max=i===col.length-1?H-16-col[i].h/2:col[i+1].y-col[i+1].h/2-GAP-col[i].h/2;
+    if(col[i].y>max)col[i].y=max;
+  }
+});
+var svg='<defs><marker id="a" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="'+R+'"/></marker></defs>';
+items.forEach(function(it){
+  var b=it.b,left=it.side==='l',sx=left?LX:RX,cx=(b.x1+b.x2)/2,cy=(b.y1+b.y2)/2,d;
+  it.el.style.top=(it.y-it.h/2)+'px';
+  if(b.c) svg+='<circle cx="'+cx+'" cy="'+cy+'" r="'+(b.x2-b.x1)/2+'" fill="none" stroke="'+R+'" stroke-width="5"/>';
+  else svg+='<rect x="'+b.x1+'" y="'+b.y1+'" width="'+(b.x2-b.x1)+'" height="'+(b.y2-b.y1)+'" rx="6" fill="none" stroke="'+R+'" stroke-width="5"/>';
+  if(it.top) d='M'+sx+','+it.y+' L'+cx+','+it.y+' L'+cx+','+(b.y1-5);
+  else if(it.at) d='M'+sx+','+it.y+' L'+px(it.at[0])+','+py(it.at[1]);
+  else{
+    var ex=left?b.x1-5:b.x2+5,ey=Math.max(b.y1+8,Math.min(b.y2-8,it.y));
+    if(b.c){var dx=sx-cx,dy=it.y-cy,n=Math.sqrt(dx*dx+dy*dy),rr=(b.x2-b.x1)/2+5;ex=cx+dx/n*rr;ey=cy+dy/n*rr;}
+    d='M'+sx+','+it.y+' L'+ex+','+ey;
+  }
+  svg+='<path d="'+d+'" fill="none" stroke="'+R+'" stroke-width="4.5" stroke-linejoin="round" marker-end="url(#a)"/>';
+});
+c.style.height=H+'px';var s=document.getElementById('s');s.setAttribute('height',H);s.innerHTML=svg;
+</script>
