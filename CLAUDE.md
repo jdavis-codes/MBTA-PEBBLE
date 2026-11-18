@@ -95,6 +95,8 @@ Key Entry Points:
 ## Development Best Practices
 
 - Before every commit, install the build on the user's real watch: start `make watch` in the background (it waits up to 5 minutes for the phone), tell the user in the same turn to open the Pebble app on their phone, and commit only after `App install succeeded.` Do not ask whether the app is open and wait for a reply. See the `pebble-vm-dev` skill.
+- Do not `git push` a change until it has been installed on the watch and the user has confirmed it looks right there. Commit locally after the install succeeds, then wait for the user's confirmation before pushing. If they ask for adjustments, make them, reinstall, and wait again.
+- Changes that do not affect the build (documentation, `CLAUDE.md`, skills, the Makefile) have nothing to install or confirm, so commit and push them directly.
 
 - Whenever making changes, run `pebble screenshot --scale 6` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
 

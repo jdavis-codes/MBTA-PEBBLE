@@ -98,6 +98,10 @@ make watch        # waits up to 5 minutes for the phone
 
 If it times out, say so and start it again when the user is ready.
 
+After a successful install, commit locally but **do not `git push` until the
+user has confirmed the change on the watch**. Changes that do not affect the
+build (docs, skills, the Makefile) skip the install and are pushed directly.
+
 Success ends with `App install succeeded.` `pebble logs --cloudpebble` streams
 logs from the watch and the phone-side JavaScript the same way.
 
