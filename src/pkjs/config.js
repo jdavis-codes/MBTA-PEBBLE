@@ -177,12 +177,12 @@ function buildConfig(saved) {
           type: 'select',
           messageKey: 'LAYOUT',
           label: 'Layout',
-          description: 'Classic rows: one row per station. Departure board: every ' +
+          description: 'Line by line: one row per station. Departure board: every ' +
                        'train in time order. Hour dial: one ring per station, each ' +
                        'train at the minute it departs.',
           defaultValue: '0',
           options: [
-            { label: 'Classic rows', value: '0' },
+            { label: 'Line by line', value: '0' },
             { label: 'Departure board', value: '1' },
             { label: 'Hour dial', value: '2' }
           ]
@@ -191,7 +191,7 @@ function buildConfig(saved) {
           type: 'slider',
           messageKey: 'DEPARTURES',
           label: 'Departures shown per row',
-          description: 'Classic rows only. The text gets smaller to fit 4 or 5 ' +
+          description: 'Line by line layout only. The text gets smaller to fit 4 or 5 ' +
                        'departures on one line.',
           defaultValue: 3,
           min: 1,

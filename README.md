@@ -28,7 +28,7 @@ wherever more than one branch stops.
 
 The watchface settings offer three layouts.
 
-- **Classic rows**: the layout shown above, one row per station.
+- **Line by line**: the layout in the guide above, one row per station.
 - **Departure board**: every upcoming train from all three stations in one
   list, soonest first, with its destination and the minutes until it leaves.
   A train inside its row's warning range blinks as a whole line, a canceled
@@ -45,10 +45,10 @@ The watchface settings offer three layouts.
   the far side from the hand: below the centre from quarter to until quarter
   past, above it for the rest of the hour.
 
-Service alerts only scroll in the classic layout. The departure board marks a
+Service alerts only scroll in the line by line layout. The departure board marks a
 train with `!` when its row has an alert; the hour dial does not show alerts.
 If the watch restarts within ten minutes of switching to one of the newer
-layouts, it goes back to classic rows by itself.
+layouts, it goes back to line by line by itself.
 
 ### Bluebikes docks
 
@@ -58,7 +58,7 @@ comes from the Bluebikes GBFS feed and refreshes every minute; the feed has no
 per-station query, so each refresh downloads the whole system's status (about
 235 KB).
 
-In the classic layout the docks are small circles along the top left, in the
+In the line by line layout the docks are small circles along the top left, in the
 order they are set. Each circle fills like a pie with the share of the dock's
 spaces that hold a rentable bike (an empty ring means no bikes). The shape
 turns square when there is almost nowhere to return a bike: a hollow square
@@ -102,7 +102,7 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
   row's label once a minute and `!` is shown before the label in between.
   Minor notices (severity below 3) are left out. If the watch ever resets
   during a scroll, alerts stay off until the settings are saved again.
-- **Layout**: classic rows, departure board or hour dial.
+- **Layout**: line by line, departure board or hour dial.
 - **Bluebikes docks**: nine slots in three clusters, each with a search box.
   Type part of a dock's name and pick it from the list beneath.
 - **Departure warning** per row: while a departure is inside its range it
