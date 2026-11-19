@@ -43,6 +43,10 @@ function savedLabel(saved) {
 }
 
 function rowSection(row, i, saved) {
+  // The explanations are the same for every station, so only the first shows them.
+  function explain(text) {
+    return i === 0 ? text : '';
+  }
   return {
     type: 'section',
     items: [
@@ -72,8 +76,8 @@ function rowSection(row, i, saved) {
         type: 'input',
         messageKey: 'LABEL[' + i + ']',
         label: 'Timetable header',
-        description: 'The name shown above this station\'s trains. Filled in when ' +
-                     'you pick a station or direction; you can edit it.',
+        description: explain('The name shown above this station\'s trains. Filled in when ' +
+                     'you pick a station or direction; you can edit it.'),
         defaultValue: row.label,
         attributes: { maxlength: 23 }
       },
@@ -81,19 +85,19 @@ function rowSection(row, i, saved) {
         type: 'toggle',
         messageKey: 'ALERT_ON[' + i + ']',
         label: 'Show service alerts',
-        description: 'An "!" marks this station when the MBTA posts an alert for ' +
+        description: explain('An "!" marks this station when the MBTA posts an alert for ' +
                      'its line. In the line by line layout the alert text also ' +
                      'scrolls across the header every minute. The hour dial does ' +
-                     'not show alerts. Minor notices are left out.',
+                     'not show alerts. Minor notices are left out.'),
         defaultValue: false
       },
       {
         type: 'toggle',
         messageKey: 'WARN_ON[' + i + ']',
         label: 'Blinking departure warning',
-        description: 'Blinks a train when it is time to head to the station. The ' +
+        description: explain('Blinks a train when it is time to head to the station. The ' +
                      'blink starts slow at your maximum time to leave, speeds up ' +
-                     'until your minimum time to leave, then stops.',
+                     'until your minimum time to leave, then stops.'),
         defaultValue: row.warn.enabled
       },
       {
