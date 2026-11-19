@@ -494,8 +494,12 @@ function hasBikes(ids) {
 // One dock as the watch's two status characters: a letter for how many eighths
 // of the dock's spaces hold a rentable bike, then a digit for how many of
 // those are e-bikes (at most BIKE_MAX_EBIKES).
+// Must match BIKE_CLOSED in src/c/watchface.c: the level letter after full.
+var BIKE_CLOSED = String.fromCharCode('a'.charCodeAt(0) + BIKE_LEVELS + 3);
+
 function bikeLetter(station) {
-  if (!station || !station.is_installed || !station.is_renting) return 'a0';
+  // A dock that is out of service, or gone from the feed altogether.
+  if (!station || !station.is_installed || !station.is_renting) return BIKE_CLOSED + '0';
   var bikes = station.num_bikes_available || 0;
   var total = bikes + (station.num_bikes_disabled || 0) +
               (station.num_docks_available || 0) + (station.num_docks_disabled || 0);

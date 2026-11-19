@@ -72,6 +72,10 @@ per-station query, so each refresh downloads the whole system's status (about
 
 ![Every Bluebikes dock indicator, enlarged](docs/guide-bikes.png)
 
+A dock that is out of service, or that Bluebikes has removed, is crossed out:
+a ring with an X through it in the line by line layout, and an X in place of
+its bar in the other layouts.
+
 In the line by line layout the docks are small circles along the top left, in the
 order they are set. Each circle fills like a pie with the share of the dock's
 spaces that hold a rentable bike (an empty ring means no bikes). The shape

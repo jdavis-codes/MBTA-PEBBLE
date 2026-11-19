@@ -75,6 +75,8 @@ typedef struct {
 // return a bike stands out: a hollow square for one free space, solid for none.
 #define BIKE_ONE_FREE (BIKE_LEVELS + 1)
 #define BIKE_FULL (BIKE_LEVELS + 2)
+// A dock that is out of service or has been removed: crossed out.
+#define BIKE_CLOSED (BIKE_LEVELS + 3)
 // Up to this many e-bikes are shown as dots around a pie.
 #define BIKE_MAX_EBIKES 8
 // Centre of the first pie, and the gap between pies; the orbiting dots reach
@@ -1030,10 +1032,20 @@ static void prv_draw_bikes(GContext *ctx) {
   for (int i = 0; i < NUM_BIKES; i++) {
     int level = s_bikes[2 * i] - 'a';
     int ebikes = s_bikes[2 * i + 1] - '0';
-    if (level < 0 || level > BIKE_FULL) {
+    if (level < 0 || level > BIKE_CLOSED) {
       continue;
     }
     GPoint centre = GPoint(BIKE_LEFT + i * spacing, BIKE_Y);
+    if (level == BIKE_CLOSED) {
+      // A ring with an X through it.
+      int r = BT_DOT_RADIUS;
+      graphics_draw_circle(ctx, centre, r);
+      graphics_draw_line(ctx, GPoint(centre.x - r + 1, centre.y - r + 1),
+                         GPoint(centre.x + r - 1, centre.y + r - 1));
+      graphics_draw_line(ctx, GPoint(centre.x - r + 1, centre.y + r - 1),
+                         GPoint(centre.x + r - 1, centre.y - r + 1));
+      continue;
+    }
     GRect square = GRect(centre.x - BT_DOT_RADIUS, centre.y - BT_DOT_RADIUS,
                          2 * BT_DOT_RADIUS + 1, 2 * BT_DOT_RADIUS + 1);
     if (level == BIKE_FULL) {
@@ -1093,14 +1105,20 @@ static void prv_draw_cluster(GContext *ctx, int c, int cx, int y) {
     for (int i = 0; i < CLUSTER_SIZE; i++) {
       int slot = c * CLUSTER_SIZE + i;
       int level = s_bikes[2 * slot] - 'a';
-      if (level < 0 || level > BIKE_FULL) {
+      if (level < 0 || level > BIKE_CLOSED) {
         continue;
       }
       first = first < 0 ? i : first;
       last = i;
       int by = y + i * BAR_PITCH;
       int bx = cx + CLUSTER_BAR_X;
-      if (level == BIKE_FULL) {
+      if (level == BIKE_CLOSED) {
+        // An X in place of the bar: a bar this short has no room for an X
+        // through its outline.
+        int x0 = bx + (BAR_W - BAR_H) / 2;
+        graphics_draw_line(ctx, GPoint(x0, by), GPoint(x0 + BAR_H - 1, by + BAR_H - 1));
+        graphics_draw_line(ctx, GPoint(x0, by + BAR_H - 1), GPoint(x0 + BAR_H - 1, by));
+      } else if (level == BIKE_FULL) {
         graphics_fill_rect(ctx, GRect(cx + 1, by, CLUSTER_BAR_X - 1 + BAR_W, BAR_H), 0, GCornerNone);
       } else if (level == BIKE_ONE_FREE) {
         graphics_fill_rect(ctx, GRect(bx, by, BAR_W - 5, BAR_H), 0, GCornerNone);
