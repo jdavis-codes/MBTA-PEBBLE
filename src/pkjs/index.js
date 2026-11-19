@@ -34,7 +34,7 @@ var ALERT_MAX_CHARS = 160;
 // whole system's status is fetched each time.
 var BIKE_STATUS_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json';
 // Must match NUM_BIKES and BIKE_LEVELS in src/c/watchface.c.
-var NUM_BIKES = 6;
+var NUM_BIKES = 9;
 var BIKE_LEVELS = 8;
 var BIKE_NONE = '-';
 // Levels past BIKE_LEVELS; must match src/c/watchface.c.
@@ -273,10 +273,8 @@ function fetchCommuterRail(row, callback) {
         json.data.forEach(function(sched) {
           var a = sched.attributes;
           var rel = sched.relationships || {};
-          if (served) {
-            var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
-            if (!trip || served.indexOf(trip.attributes.headsign) < 0) return;
-          }
+          var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
+          if (served && (!trip || served.indexOf(trip.attributes.headsign) < 0)) return;
           var pred = rel.prediction && rel.prediction.data
             ? included['prediction:' + rel.prediction.data.id] : null;
           var p = pred ? pred.attributes : null;
@@ -287,7 +285,10 @@ function fetchCommuterRail(row, callback) {
           var t = cancelled ? scheduled : (predicted || scheduled);
           var flag = cancelled ? FLAG_CANCELLED
                    : predicted && predicted - scheduled >= DELAY_SEC ? FLAG_DELAYED : FLAG_NONE;
-          if (t > nowSec) trains.push({ time: t, dest: ' ', flag: flag });
+          if (t > nowSec) {
+            trains.push({ time: t, dest: ' ', flag: flag,
+                          to: shortDest(trip && trip.attributes.headsign) });
+          }
         });
       }
       if (--pending > 0) return;
@@ -379,13 +380,13 @@ function fetchPredictions(row, showBranches, callback) {
       var t = parseIso(a.departure_time);
       if (t <= nowSec) return;
       var dest = NO_BRANCH;
+      var rel = pred.relationships || {};
+      var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
       if (showBranches) {
-        var rel = pred.relationships || {};
-        var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
         dest = branchLetter(rel.route && rel.route.data ? rel.route.data.id : '',
                             trip ? trip.attributes.headsign : '');
       }
-      trains.push({ time: t, dest: dest });
+      trains.push({ time: t, dest: dest, to: shortDest(trip && trip.attributes.headsign) });
     });
     trains.sort(function(x, y) { return x.time - y.time; });
     callback(null, { mode: MODE_MINUTES, trains: trains.slice(0, MAX_TIMES) });
@@ -517,15 +518,33 @@ function refreshBikes() {
   });
 }
 
+// Must match TO_SIZE - 1 in src/c/watchface.c.
+var TO_MAX_CHARS = 11;
+var DEST_SHORT = [
+  ['North Station', 'N Station'], ['South Station', 'S Station'], ['Government', 'Govt'],
+  [' Street', ' St'], [' Square', ' Sq'], [' Center', ' Ctr'], [' Junction', ' Jct'],
+  [' Heights', ' Hts'], [' Circle', ' Cir'], [' College', ' Coll']
+];
+
+// A train's destination, shortened to fit the departure board's column.
+function shortDest(headsign) {
+  var s = String(headsign || '').split('/')[0].split(' via ')[0];
+  DEST_SHORT.forEach(function(pair) { s = s.replace(pair[0], pair[1]); });
+  return s.replace(/\|/g, ' ').slice(0, TO_MAX_CHARS).replace(/\s+$/, '');
+}
+
 function putRow(dict, row, result) {
   var dest = '';
   var flags = '';
+  var to = [];
   for (var i = 0; i < MAX_TIMES; i++) {
     var train = result.trains[i];
     dict[keys.TIMES + row * MAX_TIMES + i] = train ? train.time : 0;
     dest += train ? train.dest : NO_BRANCH;
     flags += train && train.flag ? train.flag : FLAG_NONE;
+    if (train) to.push(train.to || '');
   }
+  dict[keys.TO + row] = to.join('|');
   dict[keys.DEST + row] = dest;
   dict[keys.FLAGS + row] = flags;
   dict[keys.MODE + row] = result.mode;
@@ -748,6 +767,7 @@ Pebble.addEventListener('appmessage', function(e) {
 if (typeof module !== 'undefined') {
   module.exports = {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
-    alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter
+    alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
+    shortDest: shortDest
   };
 }

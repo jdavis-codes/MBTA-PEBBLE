@@ -22,17 +22,48 @@ Its stations are grouped into the shared central stops and each branch's own
 stops, and departures are tagged with their branch letter (e.g. `12B 15D`)
 wherever more than one branch stops.
 
+### Layouts
+
+The watchface settings offer three layouts.
+
+- **Classic rows**: the layout shown above, one row per station.
+- **Departure board**: every upcoming train from all three stations in one
+  list, soonest first, with its destination and the minutes until it leaves.
+  A train inside its row's warning range blinks as a whole line, a canceled
+  train is struck through and a delayed train has a hatched line.
+- **Hour dial**: one ring per station, outermost first. Each train of the next
+  hour sits at the minute it departs, like the tip of a minute hand, and a thin
+  hand points at the current minute. A canceled train is a crossed circle, a
+  delayed train a hollow circle, and a row's warning range is a thicker
+  stretch of its ring. Each ring's next departure is written in a gap below
+  the centre.
+
+Service alerts only scroll in the classic layout. The departure board marks a
+train with `!` when its row has an alert; the hour dial does not show alerts.
+If the watch restarts within ten minutes of switching to one of the newer
+layouts, it goes back to classic rows by itself.
+
 ### Bluebikes docks
 
-Up to six [Bluebikes](https://bluebikes.com/system-data) docks can be shown as
-small circles along the top left, in the order they are set. Each circle fills
-like a pie with the share of the dock's spaces that hold a rentable bike (an
-empty ring means no bikes). The shape turns square when there is almost
-nowhere to return a bike: a hollow square for one free space, a solid square
-for none. Each available e-bike (up to eight) is a small dot around the
-shape. Dock status comes from the Bluebikes GBFS feed and refreshes every
-minute; the feed has no per-station query, so each refresh downloads the whole
-system's status (about 235 KB).
+Up to nine [Bluebikes](https://bluebikes.com/system-data) docks can be shown,
+in three clusters of up to three docks that are near each other. Dock status
+comes from the Bluebikes GBFS feed and refreshes every minute; the feed has no
+per-station query, so each refresh downloads the whole system's status (about
+235 KB).
+
+In the classic layout the docks are small circles along the top left, in the
+order they are set. Each circle fills like a pie with the share of the dock's
+spaces that hold a rentable bike (an empty ring means no bikes). The shape
+turns square when there is almost nowhere to return a bike: a hollow square
+for one free space, a solid square for none. Each available e-bike (up to
+eight) is a small dot around the shape.
+
+In the other layouts each cluster is a stack of bars joined by a line on the
+left. A bar fills from the left with the share of spaces holding a bike. A
+full dock is a solid bar that reaches back to touch the line. A dock with one
+free space is solid with one open cell at its right end. Any dock with two or
+more free spaces keeps a clear gap at the right, and a dot to the right of a
+bar means e-bikes are available.
 
 ### Connection dots
 
@@ -64,8 +95,9 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
   row's label once a minute and `!` is shown before the label in between.
   Minor notices (severity below 3) are left out. If the watch ever resets
   during a scroll, alerts stay off until the settings are saved again.
-- **Bluebikes docks**: six slots, each with a search box. Type part of a
-  dock's name and pick it from the list beneath.
+- **Layout**: classic rows, departure board or hour dial.
+- **Bluebikes docks**: nine slots in three clusters, each with a search box.
+  Type part of a dock's name and pick it from the list beneath.
 - **Departure warning** per row: while a departure is inside its range it
   blinks (inverted), blinking faster as the end of the range approaches — a
   cue that it's time to leave. Defaults: row 1 on, 30 → 25 min; row 2

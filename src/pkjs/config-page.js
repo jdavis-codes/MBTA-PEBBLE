@@ -280,7 +280,7 @@ module.exports = function() {
   }
 
   // Bluebikes docks: each slot has a search box that filters the select below it.
-  var NUM_BIKES = 6;
+  var NUM_BIKES = 9;
   var BIKE_MATCH_LIMIT = 40;
   var BIKE_INFO_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_information.json';
   var bikeStations = null;
@@ -322,7 +322,7 @@ module.exports = function() {
       var shown = Math.min(matches, BIKE_MATCH_LIMIT);
       setBikeStatus(matches === 0 ? 'No docks match "' + words.join(' ') + '".'
                   : shown + (matches > shown ? ' of ' + matches : '') + ' matching dock' +
-                    (matches === 1 ? ' is' : 's are') + ' in the Dock ' + (slot + 1) +
+                    (matches === 1 ? ' is' : 's are') + ' in the Cluster ' + (Math.floor(slot / 3) + 1) + ', dock ' + (slot % 3 + 1) +
                     ' list. Tap it to pick one.');
     }
     setOptions(item, options, current);

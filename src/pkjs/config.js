@@ -113,7 +113,9 @@ function rowSection(row, i, saved) {
 }
 
 // Must match NUM_BIKES in src/pkjs/index.js.
-var NUM_BIKES = 6;
+var NUM_BIKES = 9;
+// Docks are grouped into clusters of nearby docks, CLUSTER_SIZE to a cluster.
+var CLUSTER_SIZE = 3;
 var BIKE_NONE_OPTION = { value: '', label: 'None' };
 
 // A dock's saved value is "<station id>|<station name>", so the name can be
@@ -133,24 +135,28 @@ function bikeSection(saved) {
     { type: 'heading', defaultValue: 'Bluebikes docks' },
     {
       type: 'text',
-      defaultValue: 'Up to six docks, shown as small circles along the top left of ' +
-                    'the watch in this order. Each fills like a pie with the share ' +
-                    'of its spaces holding a bike; a dot beside it means an e-bike ' +
-                    'is available. Type part of a name to search, then pick the dock.'
+      defaultValue: 'Up to nine docks, in three clusters of three. Put docks that ' +
+                    'are near each other in the same cluster, so the watch shows ' +
+                    'them together. Type part of a name to search, then pick the dock.'
     },
     { type: 'text', id: 'bike-status', defaultValue: 'Loading Bluebikes docks…' }
   ];
   for (var i = 0; i < NUM_BIKES; i++) {
+    var name = 'Cluster ' + (Math.floor(i / CLUSTER_SIZE) + 1) + ', dock ' + (i % CLUSTER_SIZE + 1);
+    if (i % CLUSTER_SIZE === 0) {
+      items.push({ type: 'text',
+                   defaultValue: '<b>Cluster ' + (i / CLUSTER_SIZE + 1) + '</b>' });
+    }
     items.push({
       type: 'input',
       id: 'bike-search-' + i,
-      label: 'Dock ' + (i + 1) + ' search',
+      label: name + ' search',
       attributes: { placeholder: 'e.g. kendall', autocomplete: 'off', autocapitalize: 'off' }
     });
     items.push({
       type: 'select',
       messageKey: 'BIKE[' + i + ']',
-      label: 'Dock ' + (i + 1),
+      label: name,
       defaultValue: '',
       options: bikeOptions(saved['BIKE[' + i + ']'])
     });
@@ -168,10 +174,25 @@ function buildConfig(saved) {
       items: [
         { type: 'heading', defaultValue: 'Display' },
         {
+          type: 'select',
+          messageKey: 'LAYOUT',
+          label: 'Layout',
+          description: 'Classic rows: one row per station. Departure board: every ' +
+                       'train in time order. Hour dial: one ring per station, each ' +
+                       'train at the minute it departs.',
+          defaultValue: '0',
+          options: [
+            { label: 'Classic rows', value: '0' },
+            { label: 'Departure board', value: '1' },
+            { label: 'Hour dial', value: '2' }
+          ]
+        },
+        {
           type: 'slider',
           messageKey: 'DEPARTURES',
           label: 'Departures shown per row',
-          description: 'The text gets smaller to fit 4 or 5 departures on one line.',
+          description: 'Classic rows only. The text gets smaller to fit 4 or 5 ' +
+                       'departures on one line.',
           defaultValue: 3,
           min: 1,
           max: 5,
