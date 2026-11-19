@@ -1241,8 +1241,13 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
     for (int i = 0; i < DIAL_RING_DOTS; i++) {
       graphics_draw_pixel(ctx, prv_polar(r, TRIG_MAX_ANGLE * i / DIAL_RING_DOTS));
     }
-    // Time to leave: a thick tail along the ring from the hand to the train,
-    // which shortens as the departure comes closer.
+    // Time to leave: a thick bar along the ring. It appears when the warning
+    // range starts, runs from the hand to where the hand will be when the
+    // range ends, and so shrinks to nothing as the hand closes in.
+    int64_t lo, hi;
+    if (!prv_warning_range(section, &lo, &hi)) {
+      continue;
+    }
     for (int i = 0; i < s_mark_count[section]; i++) {
       const DialMark *mark = &s_marks[section][i];
       if (mark->flag == FLAG_CANCELLED ||
@@ -1251,7 +1256,14 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
       }
       GRect box = GRect(DIAL_CX - r - 1, DIAL_CY - r - 1, 2 * r + 3, 2 * r + 3);
       int32_t from = s_dial_now_angle;
-      int32_t to = mark->angle;
+      int32_t lead = TRIG_MAX_ANGLE * (int32_t)(lo / 1000 % DIAL_HOUR_S) / DIAL_HOUR_S;
+      int32_t to = (mark->angle - lead + TRIG_MAX_ANGLE) % TRIG_MAX_ANGLE;
+      int32_t span = (to - from + TRIG_MAX_ANGLE) % TRIG_MAX_ANGLE;
+      // The hand's angle is a few seconds old, so a bar about to end can
+      // come out as nearly a full turn; that one is already over.
+      if (span == 0 || span > TRIG_MAX_ANGLE / 2) {
+        continue;
+      }
       if (to < from) {
         graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, 3, from, TRIG_MAX_ANGLE);
         from = 0;
