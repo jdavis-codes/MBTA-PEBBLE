@@ -1,29 +1,16 @@
-// Defaults for each row; index order must match the row order in src/c/watchface.c.
-// The option lists built here are only fallbacks so saved values still show if the
-// page is offline. The settings page loads the full MBTA lists live (config-page.js).
-var ROWS = [
-  {
-    route: { value: 'CR-Newburyport', label: 'Newburyport/Rockport Line' },
-    stop: { value: 'place-north', label: 'North Station' },
-    direction: { value: '0', label: 'Outbound → Newburyport or Rockport' },
-    label: 'NORTH STA > OUT',
-    warn: { enabled: true, start: 30, end: 25 }
-  },
-  {
-    route: { value: 'CR-Newburyport', label: 'Newburyport/Rockport Line' },
-    stop: { value: 'place-ER-0168', label: 'Salem' },
-    direction: { value: '1', label: 'Inbound → North Station' },
-    label: 'SALEM > IN',
-    warn: { enabled: false, start: 15, end: 10 }
-  },
-  {
-    route: { value: 'Red', label: 'Red Line' },
-    stop: { value: 'place-cntsq', label: 'Central' },
-    direction: { value: '0', label: 'South → Ashmont/Braintree' },
-    label: 'CENTRAL > SOUTH',
-    warn: { enabled: false, start: 10, end: 5 }
-  }
-];
+// Every station starts unset: the user picks their own in the settings page.
+// Index order must match the section order in src/c/watchface.c. The option
+// lists built here are only fallbacks so saved values still show if the page
+// is offline; the settings page loads the full MBTA lists live (config-page.js).
+var NONE = { value: '', label: 'None' };
+var UNSET_ROW = {
+  route: NONE,
+  stop: NONE,
+  direction: NONE,
+  label: '',
+  warn: { enabled: false, start: 10, end: 5 }
+};
+var ROWS = [UNSET_ROW, UNSET_ROW, UNSET_ROW];
 
 // Adds the saved value as an option when it isn't one of the defaults.
 function selectOptions(fallback, saved) {

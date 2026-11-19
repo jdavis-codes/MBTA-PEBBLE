@@ -68,6 +68,8 @@ module.exports = function() {
     xhr.send();
   }
 
+  var NONE_OPTION = { value: '', label: 'None' };
+
   function rowItem(key, row) {
     return clayConfig.getItemByMessageKey(key + '[' + row + ']');
   }
@@ -264,6 +266,13 @@ module.exports = function() {
   // Refreshes a row's direction and station lists for its current line.
   function onRouteChanged(row, byUser) {
     var routeId = rowItem('ROUTE', row).get();
+    // A station left at None has nothing to choose and no header.
+    if (routeId === '') {
+      setOptions(rowItem('STOP', row), [NONE_OPTION], '');
+      setOptions(rowItem('DIR', row), [NONE_OPTION], '');
+      if (byUser) rowItem('LABEL', row).set('');
+      return;
+    }
     var route = routes[routeId];
     if (!route) return;
     setOptions(rowItem('DIR', row), directionOptions(routeId, route), rowItem('DIR', row).get());
@@ -406,6 +415,7 @@ module.exports = function() {
         routes[GREEN_ID] = mergeRoutes(greenIds, 'Green Line');
       }
       var groups = [
+        NONE_OPTION,
         { label: 'Subway', options: subway },
         { label: 'Commuter Rail', options: commuter }
       ];

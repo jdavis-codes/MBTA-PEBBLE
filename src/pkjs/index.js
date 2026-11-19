@@ -19,6 +19,8 @@ var NUM_ROWS = config.ROWS.length;
 // Row display modes; must match RowMode in src/c/watchface.c.
 var MODE_CLOCK = 0;
 var MODE_MINUTES = 1;
+// A station nobody has chosen yet.
+var MODE_UNSET = 2;
 // Per-departure status letters; must match FLAG_* in src/c/watchface.c.
 var FLAG_NONE = ' ';
 var FLAG_CANCELLED = 'X';
@@ -221,9 +223,13 @@ function rowConfig(row, saved) {
   var alerts = saved['ALERT_ON[' + row + ']'];
   var dir = pick('DIR', defaults.direction.value);
   var colon = dir.indexOf(':');
+  var route = pick('ROUTE', defaults.route.value);
+  var stop = pick('STOP', defaults.stop.value);
   return {
-    route: pick('ROUTE', defaults.route.value),
-    stop: pick('STOP', defaults.stop.value),
+    // False until a line, station and direction have all been chosen.
+    set: route !== '' && stop !== '' && dir !== '',
+    route: route,
+    stop: stop,
     direction: colon < 0 ? dir : dir.substring(0, colon),
     destination: colon < 0 ? null : dir.substring(colon + 1),
     alerts: alerts === true || alerts === 1 || alerts === '1' || alerts === 'true'
@@ -613,7 +619,7 @@ function refresh() {
   var pending = NUM_ROWS;
   for (var i = 0; i < NUM_ROWS; i++) {
     rows.push(rowConfig(i, saved));
-    if (rows[i].alerts) pending++;
+    if (rows[i].alerts && rows[i].set) pending++;
   }
   var bikeIds = bikeStations(saved);
   if (hasBikes(bikeIds)) pending++;
@@ -648,6 +654,12 @@ function refresh() {
   for (var r = 0; r < NUM_ROWS; r++) {
     (function(row) {
       var cfg = rows[row];
+      if (!cfg.set) {
+        dict[keys.ALERT + row] = '';
+        putRow(dict, row, { mode: MODE_UNSET, trains: [] });
+        done();
+        return;
+      }
       if (cfg.alerts) {
         fetchAlert(cfg, function(err, text) {
           if (fetchId !== s_fetch_id) return;

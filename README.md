@@ -4,16 +4,17 @@
 
 A Pebble watchface (diorite / flint) that shows the time plus live MBTA
 departures, fetched from the [MBTA v3 API](https://api-v3.mbta.com) by
-PebbleKit JS (`src/pkjs/index.js`). It shows three rows, each one any
-subway, light rail or commuter rail line + station + direction. The defaults:
+PebbleKit JS (`src/pkjs/index.js`). It watches up to three stations, each one
+any subway, light rail or commuter rail line + station + direction.
 
-- **North Station → Outbound** (Newburyport/Rockport Line)
-- **Salem → Inbound** to North Station
-- **Central → Southbound** Red Line
+No stations are set when the watchface is first installed. The watch shows
+"Set up on phone" until you choose them in the watchface settings in the
+Pebble app.
 
 ![Annotated guide to the watch screen](docs/watch-guide.png)
 
-The screen above uses demo data so that every marker appears at once.
+The screen above uses demo data and example stations so that every marker
+appears at once.
 
 Commuter rail rows show departure times. Subway rows show minutes until each
 train, tagged with the first letter of its destination when trains in that
@@ -103,12 +104,13 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
 - **Trains shown per station** (1–5, default 3), for the line by line layout.
   Each station's trains stay on one line; with 4 or 5 the text shrinks to fit
   and the clock gets the freed-up space.
-- **Line → Station → Direction** for each of the three stations. The page loads
+- **Line → Station → Direction** for each of the three stations. Each starts
+  at None; leave a station at None if you want fewer than three. The page loads
   these lists live from the MBTA API (`src/pkjs/config-page.js`): picking a
   line fills in its stations and directions. If the MBTA can't be reached, the
   saved choices are still shown.
 - **Timetable header** for each station: the name shown above its trains. It
-  is filled in (e.g. `SALEM > IN`) when you pick a station or direction, and
+  is filled in (e.g. `PARK ST > SOUTH`) when you pick a station or direction, and
   you can edit it. If it doesn't fit next to the countdown, the watch shortens
   the station part.
 - **Show service alerts** for each station (off by default). When the MBTA has
@@ -120,8 +122,7 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
 - **Blinking departure warning** for each station: a train blinks when it is
   time to head to the station. The blink starts slow at your **maximum time to
   leave**, speeds up until your **minimum time to leave**, then stops.
-  Defaults: station 1 on, 30 → 25 minutes; station 2, 15 → 10 and station 3,
-  10 → 5, both off.
+  It is off by default; when switched on it starts at 10 → 5 minutes.
 - **Bluebikes docks**: nine slots in three clusters, each with a search box.
   Type part of a dock's name and pick it from the list beneath.
 
