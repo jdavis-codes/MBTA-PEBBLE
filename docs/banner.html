@@ -3,25 +3,26 @@
      screen-*.png files are 144x168 captures of the three layouts. Render #b
      with a headless browser at 1440px wide to regenerate. -->
 <style>
-body{margin:0;background:#fff;font-family:"Inter","Helvetica Neue",Arial,sans-serif}
+/* Helvetica Neue where it is installed (macOS); FreeSans is the closest free match. */
+body{margin:0;background:#fff;font-family:"Helvetica Neue",Helvetica,"FreeSans","Liberation Sans",Arial,sans-serif}
 #b{position:relative;width:1440px;height:640px;overflow:hidden;
    background:linear-gradient(#c9ccce 0 38px,#f3b21b 38px 66px,#7d2a78 66px 574px,#f3b21b 574px 602px,#8f9396 602px 640px)}
 #b::after{content:"";position:absolute;inset:66px 0 66px 0;
    background:linear-gradient(90deg,rgba(255,255,255,.06),rgba(0,0,0,.14))}
 .title{position:absolute;left:44px;top:222px;z-index:2;display:flex;align-items:center;
-   color:#fff;font-weight:800;font-size:86px;letter-spacing:-2px;line-height:1}
+   color:#fff;font-weight:700;font-size:86px;letter-spacing:-1px;line-height:1}
 .ring{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
    width:126px;height:126px;margin:0 3px 0 28px;border-radius:50%;
-   background:#fbf8f1;border:5px solid #111;color:#111;font-weight:900;font-size:86px;letter-spacing:0}
-.ring span{display:block;transform:translate(0px,0px)}
-.sub{position:absolute;left:46px;top:364px;z-index:2;color:#fff;font-weight:500;font-size:30px;opacity:.92;white-space:nowrap}
+   background:#fbf8f1;border:5px solid #111;color:#111;font-weight:700;font-size:86px;letter-spacing:0}
+.ring span{display:block;transform:translate(-1px,0px)}
+.sub{position:absolute;left:46px;top:364px;z-index:2;color:#fff;font-weight:400;font-size:30px;opacity:.92;white-space:nowrap}
 /* The three layouts as a staircase: each a step right and down, in front of the last. */
 .step{position:absolute;z-index:2}
 .w{width:252px;height:294px;padding:17px;background:#17181a;border-radius:30px;
    box-shadow:0 12px 30px rgba(0,0,0,.5),inset 0 0 0 3px #2c2e31}
 .w img{display:block;width:252px;height:294px;image-rendering:pixelated;border-radius:4px}
 .cap{position:absolute;left:6px;top:338px;width:166px;color:#fff}
-.cap b{display:block;font-weight:800;font-size:19.5px;line-height:1.15;white-space:nowrap}
+.cap b{display:block;font-weight:700;font-size:19.5px;line-height:1.15;white-space:nowrap}
 .s1{left:768px;top:98px}.s2{left:942px;top:142px}.s3{left:1116px;top:186px}
 </style>
 <div id="b">
