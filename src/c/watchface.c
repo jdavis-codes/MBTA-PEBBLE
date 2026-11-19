@@ -1037,13 +1037,14 @@ static void prv_draw_bikes(GContext *ctx) {
     }
     GPoint centre = GPoint(BIKE_LEFT + i * spacing, BIKE_Y);
     if (level == BIKE_CLOSED) {
-      // A ring with an X through it.
+      // A ring with an X through it that reaches well past the ring.
       int r = BT_DOT_RADIUS;
+      int arm = r + 2;
       graphics_draw_circle(ctx, centre, r);
-      graphics_draw_line(ctx, GPoint(centre.x - r + 1, centre.y - r + 1),
-                         GPoint(centre.x + r - 1, centre.y + r - 1));
-      graphics_draw_line(ctx, GPoint(centre.x - r + 1, centre.y + r - 1),
-                         GPoint(centre.x + r - 1, centre.y - r + 1));
+      graphics_draw_line(ctx, GPoint(centre.x - arm, centre.y - arm),
+                         GPoint(centre.x + arm, centre.y + arm));
+      graphics_draw_line(ctx, GPoint(centre.x - arm, centre.y + arm),
+                         GPoint(centre.x + arm, centre.y - arm));
       continue;
     }
     GRect square = GRect(centre.x - BT_DOT_RADIUS, centre.y - BT_DOT_RADIUS,
