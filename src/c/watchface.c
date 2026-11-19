@@ -1278,12 +1278,15 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
   // rings leave free, hold one cluster each and the status dots.
   prv_draw_text(ctx, s_time_buffer, s_time_font_dial,
                 GRect(0, DIAL_CY - DIAL_TIME_DY, 2 * DIAL_CX, 40), GTextAlignmentCenter);
-  int right = 2 * DIAL_CX - CLUSTER_W - 1;
-  int bottom = 2 * DIAL_CY - CLUSTER_H - 1;
-  prv_draw_cluster(ctx, 0, 1, 1);
-  prv_draw_cluster(ctx, 1, right, 1);
-  prv_draw_cluster(ctx, 2, 1, bottom);
-  prv_draw_status(ctx, GPoint(2 * DIAL_CX - 5, 2 * DIAL_CY - 5), 0, -8);
+  // They keep the same distance from the screen edge as the outer ring does.
+  int inset = DIAL_CX - s_dial_r[0];
+  int right = 2 * DIAL_CX - CLUSTER_W - inset;
+  int bottom = 2 * DIAL_CY - CLUSTER_H - inset;
+  prv_draw_cluster(ctx, 0, inset, inset);
+  prv_draw_cluster(ctx, 1, right, inset);
+  prv_draw_cluster(ctx, 2, inset, bottom);
+  prv_draw_status(ctx, GPoint(2 * DIAL_CX - inset - BT_DOT_RADIUS - 1,
+                              2 * DIAL_CY - inset - BT_DOT_RADIUS - 1), 0, -8);
 }
 
 static void prv_canvas_draw(Layer *layer, GContext *ctx) {
