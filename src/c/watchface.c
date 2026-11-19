@@ -278,6 +278,9 @@ static int s_mark_count[NUM_SECTIONS];
 static int16_t s_dial_mins[NUM_SECTIONS];
 static int16_t s_dial_label_w[NUM_SECTIONS];
 static int32_t s_dial_now_angle;
+// 1 when the ring labels sit below the centre, -1 when above. They are always
+// on the far side from the hand, so they change sides twice an hour.
+static int8_t s_dial_label_side = 1;
 // Start and end angle of each ring's warning range, or -1 when it has none.
 static int32_t s_dial_warn[NUM_SECTIONS][2];
 
@@ -821,6 +824,9 @@ static void prv_build_dial(time_t now) {
   struct tm *tm = localtime(&now);
   int now_s = tm->tm_min * 60 + tm->tm_sec;
   s_dial_now_angle = TRIG_MAX_ANGLE * now_s / DIAL_HOUR_S;
+  // The hand is in the lower half from quarter past until quarter to.
+  int side = now_s >= DIAL_HOUR_S / 4 && now_s < 3 * DIAL_HOUR_S / 4 ? -1 : 1;
+  s_dial_label_side = (int8_t)side;
   for (int section = 0; section < NUM_SECTIONS; section++) {
     const int32_t *times = s_data.times[section];
     int r = s_dial_r[section];
@@ -846,13 +852,13 @@ static void prv_build_dial(time_t now) {
       }
       GPoint at = prv_polar(r, TRIG_MAX_ANGLE * ((now_s + wait) % DIAL_HOUR_S) / DIAL_HOUR_S);
       int dx = at.x - DIAL_CX;
-      if (at.y > DIAL_CY + r - 12 && dx > -half && dx < half) {
+      if ((at.y - DIAL_CY) * side > r - 12 && dx > -half && dx < half) {
         dx = dx >= 0 ? half : -half;
         int dy = 0;
         while ((dy + 1) * (dy + 1) <= r * r - dx * dx) {
           dy++;
         }
-        at = GPoint(DIAL_CX + dx, DIAL_CY + dy);
+        at = GPoint(DIAL_CX + dx, DIAL_CY + side * dy);
       }
       s_marks[section][n++] = (DialMark) { .at = at, .departure = times[i],
                                            .flag = s_data.flags[section][i] };
@@ -1311,9 +1317,9 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
   }
 
   // Minutes until each ring's next departure, in a gap cut into the ring
-  // below the centre.
+  // straight below or above the centre.
   for (int section = 0; section < NUM_SECTIONS; section++) {
-    int y = DIAL_CY + s_dial_r[section];
+    int y = DIAL_CY + s_dial_label_side * s_dial_r[section];
     int w = s_dial_label_w[section];
     graphics_context_set_fill_color(ctx, GColorBlack);
     graphics_fill_rect(ctx, GRect(DIAL_CX - w / 2 - 3, y - 5, w + 6, 11), 0, GCornerNone);

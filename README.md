@@ -37,7 +37,9 @@ The watchface settings offer three layouts.
   delayed train a hollow circle. While a train is inside its row's warning
   range, its marker blinks and the range is drawn as a thicker stretch of the
   ring around it. The minutes until each ring's next departure are written in a
-  gap below the centre, for commuter rail and subway alike.
+  gap in the ring, for commuter rail and subway alike. The numbers sit on
+  the far side from the hand: below the centre from quarter to until quarter
+  past, above it for the rest of the hour.
 
 Service alerts only scroll in the classic layout. The departure board marks a
 train with `!` when its row has an alert; the hour dial does not show alerts.
