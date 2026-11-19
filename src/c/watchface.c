@@ -223,6 +223,8 @@ typedef struct {
 // One train on the hour dial.
 typedef struct {
   GPoint at;
+  // Where on the ring the train departs, before any nudge clear of the labels.
+  int32_t angle;
   int32_t departure;
   char flag;
 } DialMark;
@@ -281,8 +283,6 @@ static int32_t s_dial_now_angle;
 // 1 when the ring labels sit below the centre, -1 when above. They are always
 // on the far side from the hand, so they change sides twice an hour.
 static int8_t s_dial_label_side = 1;
-// Start and end angle of each ring's warning range, or -1 when it has none.
-static int32_t s_dial_warn[NUM_SECTIONS][2];
 
 static GFont s_time_font;
 static GFont s_time_font_small;
@@ -850,7 +850,8 @@ static void prv_build_dial(time_t now) {
       if (times[i] <= now || wait >= DIAL_HOUR_S) {
         continue;
       }
-      GPoint at = prv_polar(r, TRIG_MAX_ANGLE * ((now_s + wait) % DIAL_HOUR_S) / DIAL_HOUR_S);
+      int32_t angle = TRIG_MAX_ANGLE * ((now_s + wait) % DIAL_HOUR_S) / DIAL_HOUR_S;
+      GPoint at = prv_polar(r, angle);
       int dx = at.x - DIAL_CX;
       if ((at.y - DIAL_CY) * side > r - 12 && dx > -half && dx < half) {
         dx = dx >= 0 ? half : -half;
@@ -860,26 +861,10 @@ static void prv_build_dial(time_t now) {
         }
         at = GPoint(DIAL_CX + dx, DIAL_CY + side * dy);
       }
-      s_marks[section][n++] = (DialMark) { .at = at, .departure = times[i],
+      s_marks[section][n++] = (DialMark) { .at = at, .angle = angle, .departure = times[i],
                                            .flag = s_data.flags[section][i] };
     }
     s_mark_count[section] = n;
-
-    int64_t lo, hi;
-    s_dial_warn[section][0] = -1;
-    if (prv_warning_range(section, &lo, &hi)) {
-      int lo_s = (int)(lo / 1000);
-      int hi_s = (int)(hi / 1000);
-      // The dial only reaches an hour ahead.
-      if (hi_s > DIAL_HOUR_S - 60) {
-        hi_s = DIAL_HOUR_S - 60;
-      }
-      if (lo_s < hi_s) {
-        s_dial_warn[section][0] = TRIG_MAX_ANGLE * ((now_s + lo_s) % DIAL_HOUR_S) / DIAL_HOUR_S;
-        s_dial_warn[section][1] = s_dial_warn[section][0] +
-                                  TRIG_MAX_ANGLE * (hi_s - lo_s) / DIAL_HOUR_S;
-      }
-    }
   }
 }
 
@@ -1256,21 +1241,20 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
     for (int i = 0; i < DIAL_RING_DOTS; i++) {
       graphics_draw_pixel(ctx, prv_polar(r, TRIG_MAX_ANGLE * i / DIAL_RING_DOTS));
     }
-    // The warning range, as a thicker stretch of the ring. It is only drawn
-    // while a running train is inside it, so it always belongs to a marker.
-    bool leaving = false;
+    // Time to leave: a thick tail along the ring from the hand to the train,
+    // which shortens as the departure comes closer.
     for (int i = 0; i < s_mark_count[section]; i++) {
-      leaving |= s_marks[section][i].flag != FLAG_CANCELLED &&
-                 prv_in_blink_window(section, s_marks[section][i].departure, now_ms);
-    }
-    if (leaving && s_dial_warn[section][0] >= 0) {
+      const DialMark *mark = &s_marks[section][i];
+      if (mark->flag == FLAG_CANCELLED ||
+          !prv_in_blink_window(section, mark->departure, now_ms)) {
+        continue;
+      }
       GRect box = GRect(DIAL_CX - r - 1, DIAL_CY - r - 1, 2 * r + 3, 2 * r + 3);
-      int32_t from = s_dial_warn[section][0];
-      int32_t to = s_dial_warn[section][1];
-      if (to > TRIG_MAX_ANGLE) {
+      int32_t from = s_dial_now_angle;
+      int32_t to = mark->angle;
+      if (to < from) {
         graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, 3, from, TRIG_MAX_ANGLE);
         from = 0;
-        to -= TRIG_MAX_ANGLE;
       }
       graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, 3, from, to);
     }
