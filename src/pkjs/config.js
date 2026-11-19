@@ -24,8 +24,10 @@ function selectOptions(fallback, saved) {
 // Names a saved value that the MBTA lists would otherwise label with its raw id.
 function savedLabel(saved) {
   if (/^Green-[A-Z](,Green-[A-Z])+$/.test(saved)) return 'Green Line';
-  var endpoint = /^0:(.+)$/.exec(saved);
-  if (endpoint) return 'Outbound → ' + endpoint[1] + ' only';
+  var endpoint = /^([01]):(.+)$/.exec(saved);
+  if (endpoint) {
+    return (endpoint[1] === '0' ? 'Outbound' : 'Inbound') + ' → ' + endpoint[2] + ' only';
+  }
   return saved;
 }
 

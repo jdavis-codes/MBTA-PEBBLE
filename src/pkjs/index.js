@@ -371,6 +371,24 @@ function fetchSubway(row, callback) {
   });
 }
 
+// Bus rows that have had buses to more than one destination, keyed by
+// "route|stop|direction|destination". Once seen, the row keeps its letters even while the
+// next few buses happen to share a destination.
+var s_busSplit = {};
+
+// Tags each bus with the first letter of its destination where a route splits.
+function tagBusDestinations(row, trains) {
+  var key = row.route + '|' + row.stop + '|' + row.direction + '|' + (row.destination || '');
+  var seen = {};
+  trains.forEach(function(train) { seen[train.headsign] = true; });
+  if (Object.keys(seen).length > 1) s_busSplit[key] = true;
+  if (!s_busSplit[key]) return;
+  trains.forEach(function(train) {
+    var letter = train.headsign.charAt(0).toUpperCase();
+    train.dest = /[A-Z0-9]/.test(letter) ? letter : NO_BRANCH;
+  });
+}
+
 function fetchPredictions(row, showBranches, callback) {
   apiGet('/predictions', {
     'filter[stop]': row.stop,
@@ -385,6 +403,7 @@ function fetchPredictions(row, showBranches, callback) {
     if (err) return callback(err);
     var included = indexIncluded(json);
     var nowSec = Math.floor(Date.now() / 1000);
+    var bus = isBus(row.route);
     var trains = [];
     json.data.forEach(function(pred) {
       var a = pred.attributes;
@@ -396,15 +415,18 @@ function fetchPredictions(row, showBranches, callback) {
       var dest = NO_BRANCH;
       var rel = pred.relationships || {};
       var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
+      var headsign = trip ? trip.attributes.headsign : '';
+      // A bus row set to one destination only keeps the buses going there.
+      if (bus && row.destination && headsign !== row.destination) return;
       if (showBranches) {
-        dest = branchLetter(rel.route && rel.route.data ? rel.route.data.id : '',
-                            trip ? trip.attributes.headsign : '');
+        dest = branchLetter(rel.route && rel.route.data ? rel.route.data.id : '', headsign);
       }
-      trains.push({ time: t, dest: dest, to: shortDest(trip && trip.attributes.headsign) });
+      trains.push({ time: t, dest: dest, to: shortDest(headsign), headsign: headsign });
     });
     trains.sort(function(x, y) { return x.time - y.time; });
-    callback(null, { mode: isBus(row.route) ? MODE_BUS : MODE_MINUTES,
-                     trains: trains.slice(0, MAX_TIMES) });
+    trains = trains.slice(0, MAX_TIMES);
+    if (bus) tagBusDestinations(row, trains);
+    callback(null, { mode: bus ? MODE_BUS : MODE_MINUTES, trains: trains });
   });
 }
 
@@ -789,6 +811,7 @@ if (typeof module !== 'undefined') {
   module.exports = {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
     alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
+    tagBusDestinations: tagBusDestinations,
     shortDest: shortDest
   };
 }

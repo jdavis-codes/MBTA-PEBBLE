@@ -115,6 +115,12 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
   because a bus stops on opposite sides of the street in each direction. The
   watch shows the buses the MBTA is predicting, which reaches about an hour
   ahead, so a route that runs rarely can show one bus or none.
+  - Some bus routes split and end in different places. Where they do, each bus
+    is tagged with the first letter of its destination, and the Direction list
+    offers each destination on its own (e.g. "Outbound → Waltham Center only").
+  - Known limit: the last stop of a route is offered in the Stop list but never
+    shows a bus, because buses only arrive there and the watch shows
+    departures.
 - **Timetable header** for each station: the name shown above its trains. It
   is filled in (e.g. `PARK ST > SOUTH`) when you pick a station or direction, and
   you can edit it. For a bus it is the route number and where the bus is
