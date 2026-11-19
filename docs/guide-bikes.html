@@ -1,0 +1,59 @@
+<!doctype html><meta charset="utf-8">
+<!-- Source for guide-bikes.png: every Bluebikes dock indicator, enlarged from
+     144x168 captures of the watch (screen-bikes-*.png). Render #c with a
+     headless browser at 1800px wide to regenerate. -->
+<style>
+body{margin:0;background:#fff;font-family:"DejaVu Sans","Liberation Sans",sans-serif;color:#111}
+#c{width:1800px;padding:26px 30px 30px;box-sizing:border-box;background:#fff}
+h2{font-size:24px;margin:0 0 4px}
+p.note{font-size:18px;line-height:1.35;margin:0 0 16px;max-width:1500px}
+.row{display:flex;gap:14px;margin-bottom:30px;align-items:flex-start}
+.row:last-child{margin-bottom:0}
+.it{width:178px;flex:none}
+.tile{height:124px;background:#000;border-radius:8px;display:flex;align-items:center;justify-content:center}
+.px{image-rendering:pixelated;background-repeat:no-repeat}
+.it b{display:block;font-size:17px;margin:8px 0 2px}
+.it span{display:block;font-size:15px;line-height:1.3}
+</style>
+<div id="c"></div>
+<script>
+// crop: [capture, x, y, w, h] in watch pixels.
+function pie(img,slot){return [img,6+13*slot-7,0,14,13]}
+function bar(cluster,i){return ['bars',75+20*cluster,2+6*i,19,7]}
+var ROWS=[
+ {title:'Line by line layout: one shape for each dock',
+  note:'Each dock is a small pie along the top left of the watch. The solid slice is the share of dock slots holding a bike.',
+  items:[
+   [pie('pies',0),'No bikes','An empty ring.'],
+   [pie('pies',1),'A few bikes','The slice grows with the share of slots holding a bike.'],
+   [pie('pies',2),'Half full',''],
+   [pie('pies',3),'Nearly full','Two or more free parking spaces are left.'],
+   [pie('pies',4),'Almost full','A hollow square: one free parking space.'],
+   [pie('pies',5),'Completely full','A solid square: no free parking space.'],
+   [pie('ebikes',0),'One e-bike','Each orbiting dot is one available e-bike.'],
+   [pie('ebikes',1),'Three e-bikes',''],
+   [pie('ebikes',2),'Eight e-bikes','Eight dots is the most shown.']
+  ]},
+ {title:'Departure board and hour dial: one bar for each dock',
+  note:'Docks are stacked in clusters of nearby docks, joined by a line on the left. A bar fills from the left with bikes. The fill stops at the middle of the bar, so a dock with two or more free parking spaces always shows a clear gap.',
+  items:[
+   [bar(0,0),'No bikes','An empty outline.'],
+   [bar(0,1),'A few bikes','A dock with any bikes always shows some fill.'],
+   [bar(0,2),'Half full or more','Two or more free parking spaces are left.'],
+   [bar(1,1),'Almost full','Solid with one open cell at the end: one free parking space.'],
+   [bar(1,2),'Completely full','Solid and touching the cluster’s line: no free parking space.'],
+   [bar(2,0),'E-bikes available','A dot to the right of the bar.'],
+   [['bars',74,2,20,19,5],'A cluster','Three nearby docks: no bikes, a few bikes, half full or more.']
+  ]}
+];
+var c=document.getElementById('c'),h='';
+ROWS.forEach(function(r){
+  h+='<h2>'+r.title+'</h2><p class="note">'+r.note+'</p><div class="row">';
+  r.items.forEach(function(it){
+    var k=it[0],K=k[5]||8; // an optional sixth value is the enlargement
+    h+='<div class="it"><div class="tile"><div class="px" style="width:'+k[3]*K+'px;height:'+k[4]*K+'px;background-image:url(screen-bikes-'+k[0]+'.png);background-size:'+144*K+'px '+168*K+'px;background-position:-'+k[1]*K+'px -'+k[2]*K+'px"></div></div><b>'+it[1]+'</b><span>'+it[2]+'</span></div>';
+  });
+  h+='</div>';
+});
+c.innerHTML=h;
+</script>

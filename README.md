@@ -68,6 +68,8 @@ comes from the Bluebikes GBFS feed and refreshes every minute; the feed has no
 per-station query, so each refresh downloads the whole system's status (about
 235 KB).
 
+![Every Bluebikes dock indicator, enlarged](docs/guide-bikes.png)
+
 In the line by line layout the docks are small circles along the top left, in the
 order they are set. Each circle fills like a pie with the share of the dock's
 spaces that hold a rentable bike (an empty ring means no bikes). The shape
