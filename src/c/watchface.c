@@ -1264,10 +1264,11 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
                   GRect(DIAL_CX - 30, y - 10, 60, 18), GTextAlignmentCenter);
   }
 
-  prv_draw_text(ctx, s_time_buffer, s_time_font_tiny, GRect(DIAL_CX - 36, DIAL_CY - 32, 72, 26),
+  // Inside the rings: the docks on top, the time in the middle, the status dots below.
+  prv_draw_clusters(ctx, DIAL_CX - 27, DIAL_CY - 25, 19);
+  prv_draw_text(ctx, s_time_buffer, s_time_font_tiny, GRect(DIAL_CX - 36, DIAL_CY - 11, 72, 26),
                 GTextAlignmentCenter);
-  prv_draw_clusters(ctx, DIAL_CX - 27, DIAL_CY - 7, 19);
-  prv_draw_status(ctx, GPoint(DIAL_CX + 10, DIAL_CY + 20), -10, 0);
+  prv_draw_status(ctx, GPoint(DIAL_CX + 10, DIAL_CY + 19), -10, 0);
 }
 
 static void prv_canvas_draw(Layer *layer, GContext *ctx) {
