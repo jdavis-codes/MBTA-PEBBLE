@@ -95,9 +95,9 @@ function rowSection(row, i, saved) {
         type: 'toggle',
         messageKey: 'WARN_ON[' + i + ']',
         label: 'Blinking departure warning',
-        description: explain('Blinks a train when it is time to head to the station. The ' +
-                     'blink starts slow at your maximum time to leave, speeds up ' +
-                     'until your minimum time to leave, then stops.'),
+        description: explain('When enabled, a train time slot starts to blink slowly at ' +
+                     'your maximum time to leave, speeds up until your minimum ' +
+                     'time to leave, then stops.'),
         defaultValue: row.warn.enabled
       },
       {
@@ -187,9 +187,6 @@ function buildConfig(saved) {
           type: 'select',
           messageKey: 'LAYOUT',
           label: 'Layout',
-          description: 'Line by line: one row per station. Departure board: every ' +
-                       'train in time order. Hour dial: one ring per station, each ' +
-                       'train at the minute it departs.',
           defaultValue: '0',
           options: [
             { label: 'Line by line', value: '0' },
@@ -210,12 +207,7 @@ function buildConfig(saved) {
         }
       ]
     },
-    {
-      type: 'text',
-      defaultValue: 'Choose up to three stations to watch. Commuter rail trains are ' +
-                    'shown as departure times. Subway trains depart frequently, so ' +
-                    'they are shown as minutes to departure.'
-    },
+    { type: 'heading', size: 4, defaultValue: 'Choose up to 3 stations to watch' },
     { type: 'text', id: 'mbta-status', defaultValue: 'Loading MBTA lines…' }
   ].concat(ROWS.map(function(row, i) {
     return rowSection(row, i, saved);
