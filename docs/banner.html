@@ -16,14 +16,16 @@ body{margin:0;background:#fff;font-family:"Helvetica Neue",Helvetica,"FreeSans",
    background:#fbf8f1;border:5px solid #111;color:#111;font-weight:700;font-size:86px;letter-spacing:0}
 .ring span{display:block;transform:translate(-1px,0px)}
 .sub{position:absolute;left:46px;top:364px;z-index:2;color:#fff;font-weight:400;font-size:30px;opacity:.92;white-space:nowrap}
+/* Each watch pixel is drawn as exactly 2x2 banner pixels, at even positions, so
+   the screens stay sharp here and in the half-size store banner. */
 /* The three layouts as a staircase: each a step right and down, in front of the last. */
 .step{position:absolute;z-index:2}
-.w{width:252px;height:294px;padding:17px;background:#17181a;border-radius:30px;
+.w{width:288px;height:336px;padding:18px;background:#17181a;border-radius:32px;
    box-shadow:0 12px 30px rgba(0,0,0,.5),inset 0 0 0 3px #2c2e31}
-.w img{display:block;width:252px;height:294px;image-rendering:pixelated;border-radius:4px}
-.cap{position:absolute;left:6px;top:338px;width:166px;color:#fff}
+.w img{display:block;width:288px;height:336px;image-rendering:pixelated;border-radius:4px}
+.cap{position:absolute;left:6px;top:380px;width:160px;color:#fff}
 .cap b{display:block;font-weight:700;font-size:19.5px;line-height:1.15;white-space:nowrap}
-.s1{left:768px;top:98px}.s2{left:942px;top:142px}.s3{left:1116px;top:186px}
+.s1{left:754px;top:80px}.s2{left:920px;top:120px}.s3{left:1086px;top:160px}
 </style>
 <div id="b">
   <div class="title">MBTA<span class="ring"><span>P</span></span>EBBLE</div>
