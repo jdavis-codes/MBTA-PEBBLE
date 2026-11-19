@@ -1232,6 +1232,19 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
   }
 }
 
+// Draws a stretch of a ring clockwise from one angle to another, as wide as
+// the ring itself plus `extra` pixels on each side.
+static void prv_draw_ring_arc(GContext *ctx, int r, int extra, int32_t from, int32_t to) {
+  int outer = r + extra;
+  GRect box = GRect(DIAL_CX - outer, DIAL_CY - outer, 2 * outer + 1, 2 * outer + 1);
+  int thickness = 2 * extra + 1;
+  if (to < from) {
+    graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, thickness, from, TRIG_MAX_ANGLE);
+    from = 0;
+  }
+  graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, thickness, from, to);
+}
+
 static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_context_set_stroke_color(ctx, GColorWhite);
@@ -1241,9 +1254,10 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
     for (int i = 0; i < DIAL_RING_DOTS; i++) {
       graphics_draw_pixel(ctx, prv_polar(r, TRIG_MAX_ANGLE * i / DIAL_RING_DOTS));
     }
-    // Time to leave: a thick bar along the ring. It appears when the warning
-    // range starts, runs from the hand to where the hand will be when the
-    // range ends, and so shrinks to nothing as the hand closes in.
+    // Time to leave. A bold bar runs from the hand to where the hand will be
+    // when the warning range ends, so it shrinks to nothing as the hand closes
+    // in; it blinks with the train's marker. A thin line carries on from
+    // there to the train.
     int64_t lo, hi;
     if (!prv_warning_range(section, &lo, &hi)) {
       continue;
@@ -1254,21 +1268,15 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
           !prv_in_blink_window(section, mark->departure, now_ms)) {
         continue;
       }
-      GRect box = GRect(DIAL_CX - r - 1, DIAL_CY - r - 1, 2 * r + 3, 2 * r + 3);
-      int32_t from = s_dial_now_angle;
       int32_t lead = TRIG_MAX_ANGLE * (int32_t)(lo / 1000 % DIAL_HOUR_S) / DIAL_HOUR_S;
-      int32_t to = (mark->angle - lead + TRIG_MAX_ANGLE) % TRIG_MAX_ANGLE;
-      int32_t span = (to - from + TRIG_MAX_ANGLE) % TRIG_MAX_ANGLE;
+      int32_t end = (mark->angle - lead + TRIG_MAX_ANGLE) % TRIG_MAX_ANGLE;
+      prv_draw_ring_arc(ctx, r, 0, end, mark->angle);
+      int32_t span = (end - s_dial_now_angle + TRIG_MAX_ANGLE) % TRIG_MAX_ANGLE;
       // The hand's angle is a few seconds old, so a bar about to end can
       // come out as nearly a full turn; that one is already over.
-      if (span == 0 || span > TRIG_MAX_ANGLE / 2) {
-        continue;
+      if (s_blink[section].inverted && span > 0 && span <= TRIG_MAX_ANGLE / 2) {
+        prv_draw_ring_arc(ctx, r, 1, s_dial_now_angle, end);
       }
-      if (to < from) {
-        graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, 3, from, TRIG_MAX_ANGLE);
-        from = 0;
-      }
-      graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, 3, from, to);
     }
   }
 
