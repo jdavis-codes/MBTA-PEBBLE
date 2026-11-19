@@ -1256,7 +1256,7 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
     }
     // Time to leave. A bold bar runs from the hand to where the hand will be
     // when the warning range ends, so it shrinks to nothing as the hand closes
-    // in; it blinks with the train's marker. A thin line carries on from
+    // in; it pulses between bold and thin with the train's marker. A thin line carries on from
     // there to the train.
     int64_t lo, hi;
     if (!prv_warning_range(section, &lo, &hi)) {
@@ -1274,8 +1274,9 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
       int32_t span = (end - s_dial_now_angle + TRIG_MAX_ANGLE) % TRIG_MAX_ANGLE;
       // The hand's angle is a few seconds old, so a bar about to end can
       // come out as nearly a full turn; that one is already over.
-      if (s_blink[section].inverted && span > 0 && span <= TRIG_MAX_ANGLE / 2) {
-        prv_draw_ring_arc(ctx, r, 1, s_dial_now_angle, end);
+      if (span > 0 && span <= TRIG_MAX_ANGLE / 2) {
+        // The bar blinks between bold and thin; it never drops back to dots.
+        prv_draw_ring_arc(ctx, r, s_blink[section].inverted ? 1 : 0, s_dial_now_angle, end);
       }
     }
   }

@@ -35,9 +35,9 @@ The watchface settings offer three layouts.
   hour sits at the minute it departs, like the tip of a minute hand, and a thin
   hand points at the current minute. A canceled train is a crossed circle, a
   delayed train a hollow circle. While a train is inside its row's warning
-  range, its marker blinks, and so does a bold bar that runs along the ring from
-  the hand to the point where the range ends, shrinking as the hand closes
-  in. A thin solid line carries on from there to the train.
+  range, its marker blinks, and a bar that runs along the ring from the hand to
+  the point where the range ends pulses between bold and thin, shrinking as
+  the hand closes in. A thin solid line carries on from there to the train.
   The minutes until each ring's next departure are written in a
   gap in the ring, for commuter rail and subway alike. The numbers sit on
   the far side from the hand: below the centre from quarter to until quarter
