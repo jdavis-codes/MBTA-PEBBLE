@@ -47,17 +47,17 @@ function rowSection(row, i, saved) {
       },
       {
         type: 'select',
-        messageKey: 'STOP[' + i + ']',
-        label: 'Station',
-        defaultValue: row.stop.value,
-        options: selectOptions(row.stop, saved['STOP[' + i + ']'])
-      },
-      {
-        type: 'select',
         messageKey: 'DIR[' + i + ']',
         label: 'Direction',
         defaultValue: row.direction.value,
         options: selectOptions(row.direction, saved['DIR[' + i + ']'])
+      },
+      {
+        type: 'select',
+        messageKey: 'STOP[' + i + ']',
+        label: 'Station',
+        defaultValue: row.stop.value,
+        options: selectOptions(row.stop, saved['STOP[' + i + ']'])
       },
       {
         type: 'input',
@@ -194,7 +194,7 @@ function buildConfig(saved) {
         }
       ]
     },
-    { type: 'heading', size: 4, defaultValue: 'Choose up to 3 stations to watch' },
+    { type: 'heading', size: 4, defaultValue: 'Choose up to 3 stations or bus stops to watch' },
     { type: 'text', id: 'mbta-status', defaultValue: 'Loading MBTA lines…' }
   ].concat(ROWS.map(function(row, i) {
     return rowSection(row, i, saved);

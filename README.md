@@ -4,8 +4,8 @@
 
 A Pebble watchface (diorite / flint) that shows the time plus live MBTA
 departures, fetched from the [MBTA v3 API](https://api-v3.mbta.com) by
-PebbleKit JS (`src/pkjs/index.js`). It watches up to three stations, each one
-any subway, light rail or commuter rail line + station + direction.
+PebbleKit JS (`src/pkjs/index.js`). It watches up to three stations or bus stops, each one
+any subway, light rail, commuter rail or bus line + direction + station.
 
 No stations are set when the watchface is first installed. The watch shows
 "Set up on phone" until you choose them in the watchface settings in the
@@ -16,9 +16,10 @@ Pebble app.
 The screen above uses demo data and example stations so that every marker
 appears at once.
 
-Commuter rail rows show departure times. Subway rows show minutes until each
-train, tagged with the first letter of its destination when trains in that
-direction go to different places (e.g. `A` = Ashmont, `B` = Braintree).
+Commuter rail rows show departure times. Subway and bus rows show minutes
+until each departure. A subway train is tagged with the first letter of its
+destination when trains in that direction go to different places (e.g. `A` =
+Ashmont, `B` = Braintree).
 
 The Green Line is offered as a single line covering the B, C, D and E branches.
 Its stations are grouped into the shared central stops and each branch's own
@@ -104,14 +105,20 @@ in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
 - **Trains shown per station** (1–5, default 3), for the line by line layout.
   Each station's trains stay on one line; with 4 or 5 the text shrinks to fit
   and the clock gets the freed-up space.
-- **Line → Station → Direction** for each of the three stations. Each starts
-  at None; leave a station at None if you want fewer than three. The page loads
-  these lists live from the MBTA API (`src/pkjs/config-page.js`): picking a
-  line fills in its stations and directions. If the MBTA can't be reached, the
-  saved choices are still shown.
+- **Line → Direction → Station** for each of the three stations. Each starts
+  at None; leave one at None if you want fewer than three. The page loads these
+  lists live from the MBTA API (`src/pkjs/config-page.js`): picking a line
+  fills in its directions and stations. If the MBTA can't be reached, the saved
+  choices are still shown.
+- **Buses** are at the end of the Line list, by route number. For a bus the
+  third picker is called **Stop**, and its list changes with the direction,
+  because a bus stops on opposite sides of the street in each direction. The
+  watch shows the buses the MBTA is predicting, which reaches about an hour
+  ahead, so a route that runs rarely can show one bus or none.
 - **Timetable header** for each station: the name shown above its trains. It
   is filled in (e.g. `PARK ST > SOUTH`) when you pick a station or direction, and
-  you can edit it. If it doesn't fit next to the countdown, the watch shortens
+  you can edit it. For a bus it is the route number and where the bus is
+  heading (e.g. `66 > HARVARD SQ`), since stop names are long. If it doesn't fit next to the countdown, the watch shortens
   the station part.
 - **Show service alerts** for each station (off by default). When the MBTA has
   an alert in effect for that line, station and direction, an `!` marks the

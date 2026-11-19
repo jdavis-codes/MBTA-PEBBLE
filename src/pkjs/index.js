@@ -21,6 +21,8 @@ var MODE_CLOCK = 0;
 var MODE_MINUTES = 1;
 // A station nobody has chosen yet.
 var MODE_UNSET = 2;
+// Minutes to departure, for a bus: the watch says "buses" where it would say "trains".
+var MODE_BUS = 3;
 // Per-departure status letters; must match FLAG_* in src/c/watchface.c.
 var FLAG_NONE = ' ';
 var FLAG_CANCELLED = 'X';
@@ -240,6 +242,12 @@ function isCommuterRail(route) {
   return route.indexOf('CR-') === 0;
 }
 
+// Subway and light rail routes are named; everything else offered is a bus,
+// whose route ids are numbers such as "66" or "741".
+function isBus(route) {
+  return !isCommuterRail(route) && !/^(Red|Orange|Blue|Mattapan|Green-)/.test(route);
+}
+
 // Some trains stop at an endpoint without ending there, so they count toward it too.
 // Wickford Junction trains stop at Providence; Foxboro shuttles are headed to Foxboro.
 var SERVED_HEADSIGNS = {
@@ -395,7 +403,8 @@ function fetchPredictions(row, showBranches, callback) {
       trains.push({ time: t, dest: dest, to: shortDest(trip && trip.attributes.headsign) });
     });
     trains.sort(function(x, y) { return x.time - y.time; });
-    callback(null, { mode: MODE_MINUTES, trains: trains.slice(0, MAX_TIMES) });
+    callback(null, { mode: isBus(row.route) ? MODE_BUS : MODE_MINUTES,
+                     trains: trains.slice(0, MAX_TIMES) });
   });
 }
 

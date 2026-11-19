@@ -133,8 +133,9 @@ enum { LAYOUT_CLASSIC, LAYOUT_BOARD, LAYOUT_DIAL, NUM_LAYOUTS };
 #define DIAL_HOUR_S 3600
 
 // How a row shows departures; must match MODE_* in src/pkjs/index.js.
-// MODE_UNSET is a station nobody has chosen yet.
-enum { MODE_CLOCK, MODE_MINUTES, MODE_UNSET };
+// MODE_UNSET is a station nobody has chosen yet. MODE_BUS shows minutes like
+// MODE_MINUTES, and says "buses" where a train row says "trains".
+enum { MODE_CLOCK, MODE_MINUTES, MODE_UNSET, MODE_BUS };
 
 // Per-departure status letters; must match FLAG_* in src/pkjs/index.js.
 #define FLAG_NONE ' '
@@ -486,7 +487,7 @@ static int prv_build_cells(int section, time_t now, Cell *cells) {
   int32_t upcoming[MAX_DEPARTURES];
   char dest[MAX_DEPARTURES];
   char flags[MAX_DEPARTURES];
-  bool minutes = s_data.mode[section] == MODE_MINUTES;
+  bool minutes = s_data.mode[section] == MODE_MINUTES || s_data.mode[section] == MODE_BUS;
   int n = prv_upcoming(section, now, upcoming, dest, flags, prv_departures());
   for (int i = 0; i < n; i++) {
     Cell *cell = &cells[i];
@@ -555,10 +556,14 @@ static const RowFont *prv_pick_row_font(Cell cells[][MAX_DEPARTURES], const int 
 // Fills the columns left empty once trains run out with the longest message
 // that fits, in the row font or the largest smaller one.
 static void prv_draw_no_more(GContext *ctx, GRect space, const RowFont *rf, bool any_trains,
-                             bool unset) {
+                             uint8_t mode) {
   static const char *const s_some[] = { "No more trains", "No more", "-" };
   static const char *const s_none[] = { "No trains" };
-  const char *const *texts = any_trains ? s_some : s_none;
+  static const char *const s_some_bus[] = { "No more buses", "No more", "-" };
+  static const char *const s_none_bus[] = { "No buses" };
+  bool unset = mode == MODE_UNSET;
+  bool bus = mode == MODE_BUS;
+  const char *const *texts = any_trains ? (bus ? s_some_bus : s_some) : (bus ? s_none_bus : s_none);
   int num_texts = any_trains ? (int)ARRAY_LENGTH(s_some) : (int)ARRAY_LENGTH(s_none);
   if (!s_has_data) {
     static const char *const s_loading[] = { "Loading..." };
@@ -678,7 +683,7 @@ static void prv_draw_row(GContext *ctx, int row_y, int width, int section, const
   if (n < prv_departures()) {
     int x = prv_column_x(n, width);
     prv_draw_no_more(ctx, GRect(x, row_y, width - x, spec->row_h), rf, n > 0,
-                     s_data.mode[section] == MODE_UNSET);
+                     s_data.mode[section]);
   }
 }
 
@@ -1202,7 +1207,7 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
     for (int section = 0; section < NUM_SECTIONS; section++) {
       unset &= s_data.mode[section] == MODE_UNSET;
     }
-    prv_draw_text(ctx, !s_has_data ? "Loading..." : unset ? "Set up on phone" : "No trains",
+    prv_draw_text(ctx, !s_has_data ? "Loading..." : unset ? "Set up on phone" : "No departures",
                   s_board_font,
                   GRect(0, rows_top + 40, width, 24), GTextAlignmentCenter);
     return;
@@ -1740,7 +1745,8 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     }
     if ((t = dict_find(iter, MESSAGE_KEY_MODE + section))) {
       int32_t mode = prv_tuple_int(t);
-      s_data.mode[section] = mode == MODE_MINUTES || mode == MODE_UNSET ? (uint8_t)mode : MODE_CLOCK;
+      s_data.mode[section] = mode == MODE_MINUTES || mode == MODE_UNSET || mode == MODE_BUS
+                             ? (uint8_t)mode : MODE_CLOCK;
       changed = true;
     }
   }
