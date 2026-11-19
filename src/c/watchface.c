@@ -128,7 +128,8 @@ enum { LAYOUT_CLASSIC, LAYOUT_BOARD, LAYOUT_DIAL, NUM_LAYOUTS };
 #define DIAL_TIME_DY 21
 #define DIAL_HAND_INNER 44
 #define DIAL_HAND_OUTER 71
-#define DIAL_RING_DOTS 120
+// Every DIAL_DOT_STEP-th pixel of a ring is lit.
+#define DIAL_DOT_STEP 3
 #define DIAL_HOUR_S 3600
 
 // How a row shows departures; must match MODE_* in src/pkjs/index.js.
@@ -1238,7 +1239,8 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
       graphics_draw_line(ctx, GPoint(2, y + 11), GPoint(width - 40, y + 11));
     }
     if (!inverted) {
-      for (int x = 0; x < width; x += 3) {
+      // Starts one pixel in so the dots sit the same distance from both edges.
+      for (int x = 1; x < width; x += 3) {
         graphics_draw_pixel(ctx, GPoint(x, y + BOARD_ROW_H - 1));
       }
     }
@@ -1258,15 +1260,42 @@ static void prv_draw_ring_arc(GContext *ctx, int r, int extra, int32_t from, int
   graphics_fill_radial(ctx, box, GOvalScaleModeFitCircle, thickness, from, to);
 }
 
+// Draws a ring as evenly spaced dots. The circle is walked one pixel at a
+// time (the midpoint method) and every DIAL_DOT_STEP-th pixel is lit, mirrored
+// into all eight octants, so the dots never bunch or leave uneven gaps the way
+// dots placed by angle do.
+static void prv_draw_dotted_ring(GContext *ctx, int r) {
+  int x = 0;
+  int y = r;
+  int d = 1 - r;
+  for (int i = 0; x <= y; i++) {
+    if (i % DIAL_DOT_STEP == 0) {
+      graphics_draw_pixel(ctx, GPoint(DIAL_CX + x, DIAL_CY - y));
+      graphics_draw_pixel(ctx, GPoint(DIAL_CX - x, DIAL_CY - y));
+      graphics_draw_pixel(ctx, GPoint(DIAL_CX + x, DIAL_CY + y));
+      graphics_draw_pixel(ctx, GPoint(DIAL_CX - x, DIAL_CY + y));
+      graphics_draw_pixel(ctx, GPoint(DIAL_CX + y, DIAL_CY - x));
+      graphics_draw_pixel(ctx, GPoint(DIAL_CX - y, DIAL_CY - x));
+      graphics_draw_pixel(ctx, GPoint(DIAL_CX + y, DIAL_CY + x));
+      graphics_draw_pixel(ctx, GPoint(DIAL_CX - y, DIAL_CY + x));
+    }
+    x++;
+    if (d < 0) {
+      d += 2 * x + 1;
+    } else {
+      y--;
+      d += 2 * (x - y) + 1;
+    }
+  }
+}
+
 static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_context_set_stroke_color(ctx, GColorWhite);
   graphics_context_set_stroke_width(ctx, 1);
   for (int section = 0; section < NUM_SECTIONS; section++) {
     int r = s_dial_r[section];
-    for (int i = 0; i < DIAL_RING_DOTS; i++) {
-      graphics_draw_pixel(ctx, prv_polar(r, TRIG_MAX_ANGLE * i / DIAL_RING_DOTS));
-    }
+    prv_draw_dotted_ring(ctx, r);
     // Time to leave. A bold bar runs from the hand to where the hand will be
     // when the warning range ends, so it shrinks to nothing as the hand closes
     // in; it pulses between bold and thin with the train's marker. A thin line carries on from
