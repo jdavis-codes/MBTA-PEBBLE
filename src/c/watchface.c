@@ -274,7 +274,8 @@ static int s_board_count;
 static const uint8_t s_dial_r[NUM_SECTIONS] = { 68, 58, 48 };
 static DialMark s_marks[NUM_SECTIONS][NUM_TIMES];
 static int s_mark_count[NUM_SECTIONS];
-static char s_dial_label[NUM_SECTIONS][8];
+// Minutes until each ring's next running train, or -1 when there is none.
+static int16_t s_dial_mins[NUM_SECTIONS];
 static int16_t s_dial_label_w[NUM_SECTIONS];
 static int32_t s_dial_now_angle;
 // Start and end angle of each ring's warning range, or -1 when it has none.
@@ -759,6 +760,57 @@ static void prv_build_board(time_t now) {
   }
 }
 
+// The dial's ring labels: block digits in the style of the clock, small
+// enough to fit between two rings (the smallest system clock font is too tall).
+#define SMALL_DIGIT_W 6
+#define SMALL_DIGIT_H 9
+#define SMALL_DIGIT_GAP 1
+
+// Draws a number with its top left at (x, y), or two dashes when it is
+// negative. Returns its width; with a NULL context it only measures.
+static int prv_small_number(GContext *ctx, int value, int x, int y) {
+  // Bars of a seven-segment digit: top, upper right, lower right, bottom,
+  // lower left, upper left, middle.
+  static const GRect s_bars[7] = {
+    { { 0, 0 }, { 6, 2 } }, { { 4, 0 }, { 2, 5 } }, { { 4, 4 }, { 2, 5 } }, { { 0, 7 }, { 6, 2 } },
+    { { 0, 4 }, { 2, 5 } }, { { 0, 0 }, { 2, 5 } }, { { 0, 4 }, { 6, 1 } },
+  };
+  static const uint8_t s_digits[10] = {
+    0x3F, 0x00, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F,
+  };
+  // The clock font's 1: a stem with a flag at the top and a full-width foot.
+  static const GRect s_one[3] = {
+    { { 2, 0 }, { 2, 9 } }, { { 0, 0 }, { 2, 2 } }, { { 0, 7 }, { 6, 2 } },
+  };
+  int count = value < 0 ? 2 : value >= 100 ? 3 : value >= 10 ? 2 : 1;
+  int width = count * (SMALL_DIGIT_W + SMALL_DIGIT_GAP) - SMALL_DIGIT_GAP;
+  if (!ctx) {
+    return width;
+  }
+  int divisor = count == 3 ? 100 : count == 2 ? 10 : 1;
+  for (int i = 0; i < count; i++) {
+    int dx = x + i * (SMALL_DIGIT_W + SMALL_DIGIT_GAP);
+    int digit = value < 0 ? -1 : value / divisor % 10;
+    divisor /= 10;
+    if (digit == 1) {
+      for (int b = 0; b < 3; b++) {
+        graphics_fill_rect(ctx, GRect(dx + s_one[b].origin.x, y + s_one[b].origin.y,
+                                      s_one[b].size.w, s_one[b].size.h), 0, GCornerNone);
+      }
+      continue;
+    }
+    // A dash is the middle bar alone.
+    uint8_t mask = digit < 0 ? 0x40 : s_digits[digit];
+    for (int b = 0; b < 7; b++) {
+      if (mask & (1 << b)) {
+        graphics_fill_rect(ctx, GRect(dx + s_bars[b].origin.x, y + s_bars[b].origin.y,
+                                      s_bars[b].size.w, s_bars[b].size.h), 0, GCornerNone);
+      }
+    }
+  }
+  return width;
+}
+
 static GPoint prv_polar(int r, int32_t angle) {
   return GPoint(DIAL_CX + r * sin_lookup(angle) / TRIG_MAX_RATIO,
                 DIAL_CY - r * cos_lookup(angle) / TRIG_MAX_RATIO);
@@ -773,21 +825,16 @@ static void prv_build_dial(time_t now) {
     const int32_t *times = s_data.times[section];
     int r = s_dial_r[section];
 
-    // The label is the next train that is actually running.
-    char *label = s_dial_label[section];
-    snprintf(label, sizeof(s_dial_label[section]), "--");
+    // The label is the minutes until the next train that is actually running.
+    s_dial_mins[section] = -1;
     for (int i = 0; i < NUM_TIMES; i++) {
-      if (times[i] <= now || s_data.flags[section][i] == FLAG_CANCELLED) {
-        continue;
+      if (times[i] > now && s_data.flags[section][i] != FLAG_CANCELLED) {
+        int32_t mins = (times[i] - (int32_t)now) / 60;
+        s_dial_mins[section] = (int16_t)(mins > 999 ? 999 : mins);
+        break;
       }
-      if (s_data.mode[section] == MODE_MINUTES) {
-        prv_format_wait(times[i], now, label, sizeof(s_dial_label[section]));
-      } else {
-        prv_format_clock(times[i], label, sizeof(s_dial_label[section]));
-      }
-      break;
     }
-    s_dial_label_w[section] = (int16_t)prv_text_width(label, s_header_font);
+    s_dial_label_w[section] = (int16_t)prv_small_number(NULL, s_dial_mins[section], 0, 0);
 
     // A train that would sit under the label is moved to just beside it.
     int half = s_dial_label_w[section] / 2 + 9;
@@ -1263,16 +1310,17 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
     }
   }
 
-  // Each ring's next departure, in a gap cut into the ring below the centre.
-  graphics_context_set_text_color(ctx, GColorWhite);
+  // Minutes until each ring's next departure, in a gap cut into the ring
+  // below the centre.
   for (int section = 0; section < NUM_SECTIONS; section++) {
     int y = DIAL_CY + s_dial_r[section];
     int w = s_dial_label_w[section];
     graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_rect(ctx, GRect(DIAL_CX - w / 2 - 3, y - 5, w + 6, 10), 0, GCornerNone);
-    prv_draw_text(ctx, s_dial_label[section], s_header_font,
-                  GRect(DIAL_CX - 30, y - 10, 60, 18), GTextAlignmentCenter);
+    graphics_fill_rect(ctx, GRect(DIAL_CX - w / 2 - 3, y - 5, w + 6, 11), 0, GCornerNone);
+    graphics_context_set_fill_color(ctx, GColorWhite);
+    prv_small_number(ctx, s_dial_mins[section], DIAL_CX - w / 2, y - SMALL_DIGIT_H / 2);
   }
+  graphics_context_set_text_color(ctx, GColorWhite);
 
   // The time fills the middle of the rings. The screen's corners, which the
   // rings leave free, hold one cluster each and the status dots.
