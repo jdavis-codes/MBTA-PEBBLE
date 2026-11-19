@@ -1193,8 +1193,14 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
     for (int i = 0; i < DIAL_RING_DOTS; i++) {
       graphics_draw_pixel(ctx, prv_polar(r, TRIG_MAX_ANGLE * i / DIAL_RING_DOTS));
     }
-    // The warning range, as a thicker stretch of the ring.
-    if (s_dial_warn[section][0] >= 0) {
+    // The warning range, as a thicker stretch of the ring. It is only drawn
+    // while a running train is inside it, so it always belongs to a marker.
+    bool leaving = false;
+    for (int i = 0; i < s_mark_count[section]; i++) {
+      leaving |= s_marks[section][i].flag != FLAG_CANCELLED &&
+                 prv_in_blink_window(section, s_marks[section][i].departure, now_ms);
+    }
+    if (leaving && s_dial_warn[section][0] >= 0) {
       GRect box = GRect(DIAL_CX - r - 1, DIAL_CY - r - 1, 2 * r + 3, 2 * r + 3);
       int32_t from = s_dial_warn[section][0];
       int32_t to = s_dial_warn[section][1];

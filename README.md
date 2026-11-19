@@ -34,8 +34,9 @@ The watchface settings offer three layouts.
 - **Hour dial**: one ring per station, outermost first. Each train of the next
   hour sits at the minute it departs, like the tip of a minute hand, and a thin
   hand points at the current minute. A canceled train is a crossed circle, a
-  delayed train a hollow circle, and a row's warning range is a thicker
-  stretch of its ring. Each ring's next departure is written in a gap below
+  delayed train a hollow circle. While a train is inside its row's warning
+  range, its marker blinks and the range is drawn as a thicker stretch of the
+  ring around it. Each ring's next departure is written in a gap below
   the centre.
 
 Service alerts only scroll in the classic layout. The departure board marks a
