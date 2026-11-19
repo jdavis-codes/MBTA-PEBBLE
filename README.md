@@ -45,6 +45,16 @@ The watchface settings offer three layouts.
   the far side from the hand: below the centre from quarter to until quarter
   past, above it for the rest of the hour.
 
+#### Departure board
+
+![Annotated guide to the departure board layout](docs/guide-board.png)
+
+#### Hour dial
+
+![Annotated guide to the hour dial layout](docs/guide-dial.png)
+
+Both screens use demo data so that every marker appears at once.
+
 Service alerts only scroll in the line by line layout. The departure board marks a
 train with `!` when its row has an alert; the hour dial does not show alerts.
 If the watch restarts within ten minutes of switching to one of the newer

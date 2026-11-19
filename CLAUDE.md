@@ -103,7 +103,7 @@ The `version` in `package.json` is what the Pebble phone app shows for the watch
 
 ## Documentation Voice
 
-Write the README, the watch guide (`docs/watch-guide.html`, rendered to `docs/watch-guide.png`) and other user-facing docs the way the owner writes them. The callout text in the watch guide is the reference:
+Write the README, the watch guides (`docs/watch-guide.html`, rendered to `docs/watch-guide.png`, `docs/guide-board.png` and `docs/guide-dial.png`) and other user-facing docs the way the owner writes them. The callout text in the watch guide is the reference:
 
 - Explain what the reader sees and what it means for them, not how the code does it: "A hollow square means almost full: one free parking space."
 - Name things by what they are on the watch: "train timetable header", "data connection", "end of service", "orbiting dots". Avoid internal names (row label, fetch, flag).
