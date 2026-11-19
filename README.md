@@ -1,6 +1,6 @@
 # MBTA Pebble
 
-![MBTA Pebble: trains and Bluebikes at a glance, in three layouts](docs/banner.png)
+![MBTA Pebble: trains and Bluebikes at a glance](docs/banner.png)
 
 A Pebble watchface (diorite / flint) that shows the time plus live MBTA
 departures, fetched from the [MBTA v3 API](https://api-v3.mbta.com) by
