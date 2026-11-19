@@ -68,6 +68,8 @@ module.exports = function() {
     xhr.send();
   }
 
+  var NONE_OPTION = { value: '', label: 'None' };
+
   function rowItem(key, row) {
     return clayConfig.getItemByMessageKey(key + '[' + row + ']');
   }
@@ -264,6 +266,13 @@ module.exports = function() {
   // Refreshes a row's direction and station lists for its current line.
   function onRouteChanged(row, byUser) {
     var routeId = rowItem('ROUTE', row).get();
+    // A station left at None has nothing to choose and no header.
+    if (routeId === '') {
+      setOptions(rowItem('STOP', row), [NONE_OPTION], '');
+      setOptions(rowItem('DIR', row), [NONE_OPTION], '');
+      if (byUser) rowItem('LABEL', row).set('');
+      return;
+    }
     var route = routes[routeId];
     if (!route) return;
     setOptions(rowItem('DIR', row), directionOptions(routeId, route), rowItem('DIR', row).get());
@@ -280,7 +289,7 @@ module.exports = function() {
   }
 
   // Bluebikes docks: each slot has a search box that filters the select below it.
-  var NUM_BIKES = 6;
+  var NUM_BIKES = 9;
   var BIKE_MATCH_LIMIT = 40;
   var BIKE_INFO_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_information.json';
   var bikeStations = null;
@@ -322,7 +331,7 @@ module.exports = function() {
       var shown = Math.min(matches, BIKE_MATCH_LIMIT);
       setBikeStatus(matches === 0 ? 'No docks match "' + words.join(' ') + '".'
                   : shown + (matches > shown ? ' of ' + matches : '') + ' matching dock' +
-                    (matches === 1 ? ' is' : 's are') + ' in the Dock ' + (slot + 1) +
+                    (matches === 1 ? ' is' : 's are') + ' in the Cluster ' + (Math.floor(slot / 3) + 1) + ', dock ' + (slot % 3 + 1) +
                     ' list. Tap it to pick one.');
     }
     setOptions(item, options, current);
@@ -406,6 +415,7 @@ module.exports = function() {
         routes[GREEN_ID] = mergeRoutes(greenIds, 'Green Line');
       }
       var groups = [
+        NONE_OPTION,
         { label: 'Subway', options: subway },
         { label: 'Commuter Rail', options: commuter }
       ];

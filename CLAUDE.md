@@ -97,13 +97,13 @@ Key Entry Points:
 The `version` in `package.json` is what the Pebble phone app shows for the watchface, so it identifies the build on the watch.
 
 - Format is `major.minor.patch`, digits only (no `-beta` style suffixes; the build fails). Major and minor must each be 0-255. Patch can be any whole number, but only major and minor are stored in the watch binary, so do not rely on patch on the watch side.
-- `main` is `0.0.x`. Each new branch takes the next minor (`claude/pebble-dev-tools-setup-ghhvea` is `0.1.x`) and starts at patch 0.
+- `main` is `0.0.x`. Each new branch takes the next minor and starts at patch 0. The owner may also call for the next minor for a large change on the same branch (`claude/pebble-dev-tools-setup-ghhvea` went `0.1.x`, `0.2.x` for Bluebikes, `0.3.x` for the layouts).
 - Raise the patch (`make bump`) for every build that is installed on the watch for the user to look at, before the install, so each install shows a new number. Say the version in the message that asks the user to open the app.
 - After the user confirms a version, tag its commit `v<version>` and push the tag with the branch.
 
 ## Documentation Voice
 
-Write the README, the watch guide (`docs/watch-guide.html`, rendered to `docs/watch-guide.png`) and other user-facing docs the way the owner writes them. The callout text in the watch guide is the reference:
+Write the README, the watch guides (`docs/watch-guide.html`, rendered to `docs/watch-guide.png`, `docs/guide-board.png` and `docs/guide-dial.png`; and `docs/guide-bikes.html`, rendered to `docs/guide-bikes.png`) and other user-facing docs the way the owner writes them. The callout text in the watch guide is the reference:
 
 - Explain what the reader sees and what it means for them, not how the code does it: "A hollow square means almost full: one free parking space."
 - Name things by what they are on the watch: "train timetable header", "data connection", "end of service", "orbiting dots". Avoid internal names (row label, fetch, flag).
