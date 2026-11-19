@@ -97,28 +97,31 @@ Open the settings page (via [Clay](https://github.com/pebble-dev/clay), defined
 in `src/pkjs/config.js`) from the Pebble app, or in the emulator with
 `pebble emu-app-config --emulator diorite`.
 
-- **Departures shown per row** (1–5, default 3). Each row's departures stay on
-  one line; with 4 or 5 the text shrinks to fit and the clock gets the
-  freed-up space.
-- **Line → Station → Direction** per row. The page loads these lists live from
-  the MBTA API (`src/pkjs/config-page.js`): picking a line fills in its
-  stations and directions. If the MBTA can't be reached, the saved choices are
-  still shown.
-- **Label on watch** per row, filled in automatically (e.g. `SALEM > IN`) when
-  you change the station or direction, and editable. If it doesn't fit next to
-  the countdown, the watch shortens the station part.
-- **Show service alerts** per row (off by default): when the MBTA has an alert
-  in effect for that line, station and direction, its text scrolls across the
-  row's label once a minute and `!` is shown before the label in between.
-  Minor notices (severity below 3) are left out. If the watch ever resets
-  during a scroll, alerts stay off until the settings are saved again.
 - **Layout**: line by line, departure board or hour dial.
+- **Trains shown per station** (1–5, default 3), for the line by line layout.
+  Each station's trains stay on one line; with 4 or 5 the text shrinks to fit
+  and the clock gets the freed-up space.
+- **Line → Station → Direction** for each of the three stations. The page loads
+  these lists live from the MBTA API (`src/pkjs/config-page.js`): picking a
+  line fills in its stations and directions. If the MBTA can't be reached, the
+  saved choices are still shown.
+- **Timetable header** for each station: the name shown above its trains. It
+  is filled in (e.g. `SALEM > IN`) when you pick a station or direction, and
+  you can edit it. If it doesn't fit next to the countdown, the watch shortens
+  the station part.
+- **Show service alerts** for each station (off by default). When the MBTA has
+  an alert in effect for that line, station and direction, an `!` marks the
+  station. In the line by line layout the alert text also scrolls across the
+  header every minute. The hour dial does not show alerts. Minor notices
+  (severity below 3) are left out. If the watch ever resets during a scroll,
+  alerts stay off until the settings are saved again.
+- **Blinking departure warning** for each station: a train blinks when it is
+  time to head to the station. The blink starts slow at your **maximum time to
+  leave**, speeds up until your **minimum time to leave**, then stops.
+  Defaults: station 1 on, 30 → 25 minutes; station 2, 15 → 10 and station 3,
+  10 → 5, both off.
 - **Bluebikes docks**: nine slots in three clusters, each with a search box.
   Type part of a dock's name and pick it from the list beneath.
-- **Departure warning** per row: while a departure is inside its range it
-  blinks (inverted), blinking faster as the end of the range approaches — a
-  cue that it's time to leave. Defaults: row 1 on, 30 → 25 min; row 2
-  15 → 10 and row 3 10 → 5, both off.
 
 Commuter rail times are scheduled times, replaced by live predictions when
 the MBTA has them. A cancelled train stays at its scheduled time, crossed
