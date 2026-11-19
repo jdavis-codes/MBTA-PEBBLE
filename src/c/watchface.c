@@ -93,6 +93,8 @@ typedef struct {
 #define BAR_PITCH 6
 #define CLUSTER_BAR_X 3
 #define CLUSTER_EBIKE_X 15
+#define CLUSTER_W 17
+#define CLUSTER_H (CLUSTER_SIZE * BAR_PITCH - 1)
 #define INDICATOR_BOTTOM 13
 // Where the digits sit inside the clock's text box.
 #define TIME_GLYPH_TOP 11
@@ -122,7 +124,9 @@ enum { LAYOUT_CLASSIC, LAYOUT_BOARD, LAYOUT_DIAL, NUM_LAYOUTS };
 // The hour dial: one ring per row, each train at the minute it departs.
 #define DIAL_CX 72
 #define DIAL_CY 84
-#define DIAL_HAND_INNER 40
+// Offset of the time's text box above the centre, so its digits are centred.
+#define DIAL_TIME_DY 21
+#define DIAL_HAND_INNER 44
 #define DIAL_HAND_OUTER 71
 #define DIAL_RING_DOTS 120
 #define DIAL_HOUR_S 3600
@@ -267,7 +271,7 @@ static BlinkState s_blink[NUM_SECTIONS];
 
 static BoardRow s_board[BOARD_ROWS];
 static int s_board_count;
-static const uint8_t s_dial_r[NUM_SECTIONS] = { 67, 56, 45 };
+static const uint8_t s_dial_r[NUM_SECTIONS] = { 68, 58, 48 };
 static DialMark s_marks[NUM_SECTIONS][NUM_TIMES];
 static int s_mark_count[NUM_SECTIONS];
 static char s_dial_label[NUM_SECTIONS][8];
@@ -278,7 +282,7 @@ static int32_t s_dial_warn[NUM_SECTIONS][2];
 
 static GFont s_time_font;
 static GFont s_time_font_small;
-static GFont s_time_font_tiny;
+static GFont s_time_font_dial;
 static GFont s_board_font;
 static GFont s_board_to_font;
 static GFont s_header_font;
@@ -1026,13 +1030,12 @@ static void prv_draw_status(GContext *ctx, GPoint dot, int dx, int dy) {
   }
 }
 
-// Draws the docks as one stack of bars per cluster, joined by a spine on the
+// Draws one cluster of docks as a stack of bars joined by a spine on the
 // left. Each dock keeps its place in its stack.
-static void prv_draw_clusters(GContext *ctx, int x, int y, int pitch) {
+static void prv_draw_cluster(GContext *ctx, int c, int cx, int y) {
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_context_set_stroke_color(ctx, GColorWhite);
-  for (int c = 0; c < NUM_CLUSTERS; c++) {
-    int cx = x + c * pitch;
+  {
     int first = -1;
     int last = -1;
     for (int i = 0; i < CLUSTER_SIZE; i++) {
@@ -1068,6 +1071,13 @@ static void prv_draw_clusters(GContext *ctx, int x, int y, int pitch) {
       graphics_draw_line(ctx, GPoint(cx, y + first * BAR_PITCH),
                          GPoint(cx, y + last * BAR_PITCH + BAR_H - 1));
     }
+  }
+}
+
+// The clusters side by side.
+static void prv_draw_clusters(GContext *ctx, int x, int y, int pitch) {
+  for (int c = 0; c < NUM_CLUSTERS; c++) {
+    prv_draw_cluster(ctx, c, x + c * pitch, y);
   }
 }
 
@@ -1259,16 +1269,21 @@ static void prv_draw_dial(GContext *ctx, int64_t now_ms) {
     int y = DIAL_CY + s_dial_r[section];
     int w = s_dial_label_w[section];
     graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_rect(ctx, GRect(DIAL_CX - w / 2 - 3, y - 5, w + 6, 11), 0, GCornerNone);
+    graphics_fill_rect(ctx, GRect(DIAL_CX - w / 2 - 3, y - 5, w + 6, 10), 0, GCornerNone);
     prv_draw_text(ctx, s_dial_label[section], s_header_font,
                   GRect(DIAL_CX - 30, y - 10, 60, 18), GTextAlignmentCenter);
   }
 
-  // Inside the rings: the docks on top, the time in the middle, the status dots below.
-  prv_draw_clusters(ctx, DIAL_CX - 27, DIAL_CY - 25, 19);
-  prv_draw_text(ctx, s_time_buffer, s_time_font_tiny, GRect(DIAL_CX - 36, DIAL_CY - 11, 72, 26),
-                GTextAlignmentCenter);
-  prv_draw_status(ctx, GPoint(DIAL_CX + 10, DIAL_CY + 19), -10, 0);
+  // The time fills the middle of the rings. The screen's corners, which the
+  // rings leave free, hold one cluster each and the status dots.
+  prv_draw_text(ctx, s_time_buffer, s_time_font_dial,
+                GRect(0, DIAL_CY - DIAL_TIME_DY, 2 * DIAL_CX, 40), GTextAlignmentCenter);
+  int right = 2 * DIAL_CX - CLUSTER_W - 1;
+  int bottom = 2 * DIAL_CY - CLUSTER_H - 1;
+  prv_draw_cluster(ctx, 0, 1, 1);
+  prv_draw_cluster(ctx, 1, right, 1);
+  prv_draw_cluster(ctx, 2, 1, bottom);
+  prv_draw_status(ctx, GPoint(2 * DIAL_CX - 5, 2 * DIAL_CY - 5), 0, -8);
 }
 
 static void prv_canvas_draw(Layer *layer, GContext *ctx) {
@@ -1724,7 +1739,7 @@ static void prv_init(void) {
   s_time_font = fonts_get_system_font(FONT_KEY_LECO_36_BOLD_NUMBERS);
   s_header_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   s_time_font_small = fonts_get_system_font(FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
-  s_time_font_tiny = fonts_get_system_font(FONT_KEY_LECO_20_BOLD_NUMBERS);
+  s_time_font_dial = fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS);
   s_board_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   s_board_to_font = fonts_get_system_font(FONT_KEY_GOTHIC_14);
   for (int f = 0; f < NUM_ROW_FONTS; f++) {
