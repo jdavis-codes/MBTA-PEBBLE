@@ -12,7 +12,7 @@ body{margin:0;background:#fff;font-family:"Inter","Helvetica Neue",Arial,sans-se
    color:#fff;font-weight:800;font-size:86px;letter-spacing:-2px;line-height:1}
 .ring{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
    width:126px;height:126px;margin:0 3px 0 28px;border-radius:50%;
-   background:#fbf8f1;border:9px solid #111;color:#111;font-weight:900;font-size:86px;letter-spacing:0}
+   background:#fbf8f1;border:5px solid #111;color:#111;font-weight:900;font-size:86px;letter-spacing:0}
 .ring span{transform:translateX(3px)}
 .sub{position:absolute;left:48px;top:380px;z-index:2;color:#fff;font-weight:500;font-size:30px;opacity:.92}
 /* The three layouts as a staircase: each a step right and down, in front of the last. */
@@ -22,17 +22,15 @@ body{margin:0;background:#fff;font-family:"Inter","Helvetica Neue",Arial,sans-se
 .w img{display:block;width:252px;height:294px;image-rendering:pixelated;border-radius:4px}
 .cap{position:absolute;left:6px;top:338px;width:166px;color:#fff}
 .cap b{display:block;font-weight:800;font-size:19.5px;line-height:1.15;white-space:nowrap}
-.cap span{display:block;font-weight:500;font-size:15.5px;line-height:1.25;opacity:.9;margin-top:3px}
-.s1{left:768px;top:74px}.s2{left:942px;top:118px}.s3{left:1116px;top:162px}
-.s3 .cap{width:310px}
+.s1{left:768px;top:88px}.s2{left:942px;top:132px}.s3{left:1116px;top:176px}
 </style>
 <div id="b">
   <div class="title">MBTA<span class="ring"><span>P</span></span>EBBLE</div>
   <div class="sub">Trains and Bluebikes at a glance</div>
-  <div class="step s1"><div class="w"><img src="screen-classic.png"></div>
-    <div class="cap"><b>Classic rows</b><span>One row per station</span></div></div>
+  <div class="step s1"><div class="w"><img src="screen-dial.png"></div>
+    <div class="cap"><b>Hour dial</b></div></div>
   <div class="step s2"><div class="w"><img src="screen-board.png"></div>
-    <div class="cap"><b>Departure board</b><span>Every train in time order</span></div></div>
-  <div class="step s3"><div class="w"><img src="screen-dial.png"></div>
-    <div class="cap"><b>Hour dial</b><span>The next hour of trains on a clock face</span></div></div>
+    <div class="cap"><b>Departure board</b></div></div>
+  <div class="step s3"><div class="w"><img src="screen-classic.png"></div>
+    <div class="cap"><b>Classic rows</b></div></div>
 </div>
