@@ -1,0 +1,33 @@
+<!doctype html><meta charset="utf-8">
+<!-- Source for banner.png (1440x640) and banner-store.png (720x320). The
+     screen-*.png files are 144x168 captures of the three layouts. Render #b
+     with a headless browser at 1440px wide to regenerate. -->
+<style>
+body{margin:0;background:#fff;font-family:"Inter","Helvetica Neue",Arial,sans-serif}
+#b{position:relative;width:1440px;height:640px;overflow:hidden;
+   background:linear-gradient(#c9ccce 0 38px,#f3b21b 38px 66px,#7d2a78 66px 574px,#f3b21b 574px 602px,#8f9396 602px 640px)}
+#b::after{content:"";position:absolute;inset:66px 0 66px 0;
+   background:linear-gradient(90deg,rgba(255,255,255,.06),rgba(0,0,0,.14))}
+.title{position:absolute;left:44px;top:226px;z-index:2;display:flex;align-items:center;
+   color:#fff;font-weight:800;font-size:86px;letter-spacing:-2px;line-height:1}
+.ring{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
+   width:126px;height:126px;margin:0 3px 0 28px;border-radius:50%;
+   background:#fbf8f1;border:9px solid #111;color:#111;font-weight:900;font-size:86px;letter-spacing:0}
+.ring span{transform:translateX(3px)}
+.sub{position:absolute;left:48px;top:380px;z-index:2;color:#fff;font-weight:500;font-size:27px;opacity:.92}
+.fan{position:absolute;left:1106px;top:540px;z-index:2}
+.w{position:absolute;left:-166px;top:-398px;width:288px;height:336px;padding:22px;
+   background:#17181a;border-radius:34px;transform-origin:50% 185%;
+   box-shadow:0 14px 34px rgba(0,0,0,.45),inset 0 0 0 3px #2c2e31}
+.w img{display:block;width:288px;height:336px;image-rendering:pixelated;border-radius:4px}
+.w.l{transform:rotate(-19deg)}.w.r{transform:rotate(19deg)}.w.c{z-index:3;top:-412px}
+</style>
+<div id="b">
+  <div class="title">MBTA<span class="ring"><span>P</span></span>ebble</div>
+  <div class="sub">Trains and Bluebikes at a glance, in three layouts.</div>
+  <div class="fan">
+    <div class="w l"><img src="screen-board.png"></div>
+    <div class="w r"><img src="screen-dial.png"></div>
+    <div class="w c"><img src="screen-classic.png"></div>
+  </div>
+</div>
