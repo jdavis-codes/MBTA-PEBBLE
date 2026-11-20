@@ -165,9 +165,11 @@ function bikeSection(saved) {
 
 // saved: the flat settings Clay keeps in localStorage ('clay-settings').
 // usage: lines describing how much data has been downloaded, from index.js.
-function buildConfig(saved, usage) {
+// location: lines from the location test, also from index.js.
+function buildConfig(saved, usage, location) {
   saved = saved || {};
   usage = usage || [];
+  location = location || [];
   return [
     { type: 'heading', defaultValue: 'MBTA Pebble' },
     {
@@ -211,6 +213,16 @@ function buildConfig(saved, usage) {
         {
           type: 'text',
           defaultValue: usage.join('<br>')
+        }
+      ]
+    },
+    {
+      type: 'section',
+      items: [
+        { type: 'heading', defaultValue: 'Location test' },
+        {
+          type: 'text',
+          defaultValue: location.join('<br>')
         }
       ]
     },

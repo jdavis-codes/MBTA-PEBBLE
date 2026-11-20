@@ -201,6 +201,83 @@ function usageLines(detail) {
   return lines;
 }
 
+// Location test. Each time the watch asks for fresh data the phone is also
+// asked where it is, the way the open-source weather faces do it (TimeStyle,
+// pebble-generic-weather: getCurrentPosition with a 15 s timeout and a fix up
+// to a minute old). Nothing is done with the position yet: the point is to
+// learn whether the phone answers while the Pebble app is in the background.
+// The results are kept per day in localStorage and shown in the settings.
+var LOCATION_KEY = 'locationTest';
+var LOCATION_OPTIONS = { timeout: 15000, maximumAge: 60000, enableHighAccuracy: false };
+
+function loadLocationTest() {
+  try {
+    var t = JSON.parse(localStorage.getItem(LOCATION_KEY)) || {};
+    return t.day === usageDay(0) ? t : { day: usageDay(0), asked: 0, ok: 0, failed: 0, gap: 0 };
+  } catch (e) {
+    return { day: usageDay(0), asked: 0, ok: 0, failed: 0, gap: 0 };
+  }
+}
+
+function saveLocationTest(t) {
+  try {
+    localStorage.setItem(LOCATION_KEY, JSON.stringify(t));
+  } catch (e) { /* only a diagnostic */ }
+}
+
+function testLocation() {
+  var t = loadLocationTest();
+  var geo = typeof navigator !== 'undefined' && navigator.geolocation;
+  t.asked++;
+  if (!geo) {
+    t.failed++;
+    t.error = 'the phone offers no location service to the watchface';
+    return saveLocationTest(t);
+  }
+  saveLocationTest(t);
+  var started = Date.now();
+  geo.getCurrentPosition(function(pos) {
+    var r = loadLocationTest();
+    var now = Date.now();
+    r.ok++;
+    // The longest wait between two answers shows up background stalls.
+    if (r.lastOk && now - r.lastOk > r.gap) r.gap = now - r.lastOk;
+    r.lastOk = now;
+    r.took = now - started;
+    r.accuracy = Math.round(pos.coords.accuracy || 0);
+    r.age = pos.timestamp ? Math.max(0, Math.round((now - pos.timestamp) / 1000)) : -1;
+    // Rounded to about a kilometre: enough to see it is right, and it never leaves the phone.
+    r.where = pos.coords.latitude.toFixed(2) + ', ' + pos.coords.longitude.toFixed(2);
+    saveLocationTest(r);
+  }, function(err) {
+    var r = loadLocationTest();
+    r.failed++;
+    r.error = (err && err.code === 1 ? 'permission denied' : err && err.code === 3 ? 'timed out'
+               : 'position unavailable') + ' at ' + clockTime(Date.now());
+    saveLocationTest(r);
+  }, LOCATION_OPTIONS);
+}
+
+function clockTime(ms) {
+  var d = new Date(ms);
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+
+function locationLines() {
+  var t = loadLocationTest();
+  if (!t.asked) return ['Not asked yet today.'];
+  var lines = ['Asked ' + t.asked + (t.asked === 1 ? ' time' : ' times') + ' today: ' + t.ok +
+               ' answered, ' + t.failed + ' failed.'];
+  if (t.lastOk) {
+    lines.push('Last answer at ' + clockTime(t.lastOk) + ': within ' + t.accuracy + ' m, ' +
+               (t.age < 0 ? 'age unknown' : t.age + ' s old') + ', took ' +
+               (t.took / 1000).toFixed(1) + ' s. Near ' + t.where + '.');
+    lines.push('Longest wait between answers: ' + Math.round(t.gap / 60000) + ' min.');
+  }
+  if (t.error) lines.push('Last failure: ' + t.error + '.');
+  return lines;
+}
+
 function apiGet(path, params, callback) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', API_BASE + path + '?' + buildQuery(params), true);
@@ -761,6 +838,7 @@ function refresh() {
   // Every tenth refresh (about 20 minutes) the history is logged again, so a
   // log capture attached at any time sees it without the app restarting.
   if (++s_refreshes % 10 === 0) logDiagHistory();
+  testLocation();
   if (s_fetching) {
     if (Date.now() - s_fetch_started < FETCH_HUNG_MS) {
       s_refetch = true;
@@ -854,7 +932,8 @@ function refresh() {
 
 Pebble.addEventListener('showConfiguration', function() {
   // Rebuilt each time so the page includes the saved stations as fallback options.
-  clay = new Clay(config.build(savedSettings(), usageLines()), configPage, { autoHandleEvents: false });
+  clay = new Clay(config.build(savedSettings(), usageLines(), locationLines()), configPage,
+                  { autoHandleEvents: false });
   Pebble.openURL(clay.generateUrl());
 });
 
@@ -918,6 +997,8 @@ function recordDiag(text) {
 function logDiagHistory() {
   var history = diagHistory();
   usageLines(true).forEach(function(line) { console.log('USAGE ' + line); });
+  // The position itself stays out of the logs.
+  locationLines().forEach(function(line) { console.log('LOCATION ' + line.replace(/ Near .*$/, '')); });
   console.log('DIAG HISTORY ' + history.length + ' entries');
   history.forEach(function(entry) {
     console.log('DIAG ' + entry.t + ' ' + entry.d);
@@ -942,6 +1023,7 @@ if (typeof module !== 'undefined') {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
     alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
     tagBusDestinations: tagBusDestinations, noteUsage: noteUsage, usageLines: usageLines,
+    testLocation: testLocation, locationLines: locationLines,
     shortDest: shortDest
   };
 }
