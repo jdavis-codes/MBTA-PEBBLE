@@ -36,7 +36,16 @@ var ALERT_MAX_CHARS = 160;
 
 // Bluebikes dock status (GBFS). The feed has no per-station query, so the
 // whole system's status is fetched each time.
-var BIKE_STATUS_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json';
+// The same feed is served from two addresses. Bluebikes' own compresses the
+// download (about 18 KB instead of 234 KB), so it is tried first; Lyft's is
+// the published one and is the fallback.
+var BIKE_STATUS_URLS = [
+  'https://gbfs.bluebikes.com/gbfs/en/station_status.json',
+  'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json'
+];
+// Roughly what gzip leaves of the dock feed, for downloads whose size on the
+// wire the phone does not report.
+var BIKE_GZIP_RATIO = 0.076;
 // Must match NUM_BIKES and BIKE_LEVELS in src/c/watchface.c.
 var NUM_BIKES = 9;
 var BIKE_LEVELS = 8;
@@ -86,6 +95,83 @@ function buildQuery(params) {
   return parts.join('&');
 }
 
+// Data usage. Every download is counted per day in localStorage, split into
+// trains (MBTA) and bikes (Bluebikes): how many, how much data they held, and
+// how much of that crossed the network where the phone reports it.
+var USAGE_KEY = 'usage';
+var USAGE_DAYS = 3;
+
+function usageDay(offset) {
+  var d = new Date(Date.now() - (offset || 0) * 86400000);
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+
+function loadUsage() {
+  try {
+    return JSON.parse(localStorage.getItem(USAGE_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function header(xhr, name) {
+  try {
+    return xhr.getResponseHeader(name) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function noteUsage(kind, xhr) {
+  var size = xhr.responseText ? xhr.responseText.length : 0;
+  var gzip = /gzip|br|deflate/i.test(header(xhr, 'Content-Encoding'));
+  var length = parseInt(header(xhr, 'Content-Length'), 10);
+  var usage = loadUsage();
+  var today = usageDay(0);
+  var day = usage[today] || (usage[today] = {});
+  var u = day[kind] || (day[kind] = { n: 0, data: 0, wire: 0, gz: 0, est: 0 });
+  u.n++;
+  u.data += size;
+  if (gzip) u.gz++;
+  if (length > 0) {
+    // A reported length is the size on the wire, compressed or not.
+    u.wire += length;
+  } else if (gzip) {
+    // Compressed, but the phone does not say by how much: estimate it.
+    u.wire += Math.round(size * BIKE_GZIP_RATIO);
+    u.est++;
+  } else {
+    u.wire += size;
+  }
+  // Keep only the last few days.
+  Object.keys(usage).sort().slice(0, -USAGE_DAYS).forEach(function(k) { delete usage[k]; });
+  try {
+    localStorage.setItem(USAGE_KEY, JSON.stringify(usage));
+  } catch (e) { /* storage full: usage is only a diagnostic */ }
+}
+
+function megabytes(bytes) {
+  return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
+}
+
+// One line per day and kind, for the logs and the settings page.
+function usageLines() {
+  var usage = loadUsage();
+  var lines = [];
+  [[usageDay(0), 'Today'], [usageDay(1), 'Yesterday']].forEach(function(d) {
+    var day = usage[d[0]];
+    if (!day) return;
+    [['bikes', 'Bluebikes'], ['trains', 'MBTA']].forEach(function(k) {
+      var u = day[k[0]];
+      if (!u) return;
+      lines.push(d[1] + ', ' + k[1] + ': ' + (u.est ? 'about ' : '') + megabytes(u.wire) +
+                 ' downloaded in ' + u.n + (u.n === 1 ? ' request' : ' requests') +
+                 (u.gz ? ' (' + u.gz + ' compressed, ' + megabytes(u.data) + ' uncompressed)' : ''));
+    });
+  });
+  return lines;
+}
+
 function apiGet(path, params, callback) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', API_BASE + path + '?' + buildQuery(params), true);
@@ -94,6 +180,7 @@ function apiGet(path, params, callback) {
     xhr.setRequestHeader('x-api-key', MBTA_API_KEY);
   }
   xhr.onload = function() {
+    noteUsage('trains', xhr);
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
         callback(null, JSON.parse(xhr.responseText));
@@ -116,6 +203,7 @@ function getJson(url, callback) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   xhr.onload = function() {
+    noteUsage('bikes', xhr);
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
         callback(null, JSON.parse(xhr.responseText));
@@ -517,9 +605,17 @@ function bikeLetter(station) {
 }
 
 // Calls back with the status string for the given dock slots.
-function fetchBikes(ids, callback) {
-  getJson(BIKE_STATUS_URL, function(err, json) {
-    if (err) return callback(err);
+function fetchBikes(ids, callback, attempt) {
+  attempt = attempt || 0;
+  getJson(BIKE_STATUS_URLS[attempt], function(err, json) {
+    if (err || !json || !json.data || !json.data.stations) {
+      // Fall back to the next address before giving up.
+      if (attempt + 1 < BIKE_STATUS_URLS.length) {
+        console.log('Bluebikes feed ' + (attempt + 1) + ' failed, trying the next');
+        return fetchBikes(ids, callback, attempt + 1);
+      }
+      return callback(err || new Error('Unexpected dock feed'));
+    }
     var wanted = {};
     ids.forEach(function(id) { if (id) wanted[id] = null; });
     json.data.stations.forEach(function(station) {
@@ -729,7 +825,7 @@ function refresh() {
 
 Pebble.addEventListener('showConfiguration', function() {
   // Rebuilt each time so the page includes the saved stations as fallback options.
-  clay = new Clay(config.build(savedSettings()), configPage, { autoHandleEvents: false });
+  clay = new Clay(config.build(savedSettings(), usageLines()), configPage, { autoHandleEvents: false });
   Pebble.openURL(clay.generateUrl());
 });
 
@@ -792,6 +888,7 @@ function recordDiag(text) {
 
 function logDiagHistory() {
   var history = diagHistory();
+  usageLines().forEach(function(line) { console.log('USAGE ' + line); });
   console.log('DIAG HISTORY ' + history.length + ' entries');
   history.forEach(function(entry) {
     console.log('DIAG ' + entry.t + ' ' + entry.d);
@@ -815,7 +912,7 @@ if (typeof module !== 'undefined') {
   module.exports = {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
     alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
-    tagBusDestinations: tagBusDestinations,
+    tagBusDestinations: tagBusDestinations, noteUsage: noteUsage, usageLines: usageLines,
     shortDest: shortDest
   };
 }

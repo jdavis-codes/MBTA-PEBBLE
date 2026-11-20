@@ -1,7 +1,7 @@
 {
   "name": "watchface",
   "author": "MakeAwesomeHappen",
-  "version": "0.4.3",
+  "version": "0.4.5",
   "keywords": [
     "pebble-app"
   ],
@@ -57,7 +57,8 @@
         "parameters": {
           "domains": [
             "api-v3.mbta.com",
-            "gbfs.lyft.com"
+            "gbfs.lyft.com",
+            "gbfs.bluebikes.com"
           ]
         }
       }

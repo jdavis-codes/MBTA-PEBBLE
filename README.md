@@ -63,8 +63,13 @@ layouts, it goes back to line by line by itself.
 
 ### Bluebikes docks
 
-Up to nine [Bluebikes](https://bluebikes.com/system-data) docks can be shown. since often bluebike docks are clustered in high traffic areas like north station, I've layed out the indicators as groups of 3. Dock status comes from the Bluebikes GBFS feed and refreshes every minute; the feed has no per-station query, so each refresh downloads the whole system's status (about
-235 KB).
+Up to nine [Bluebikes](https://bluebikes.com/system-data) docks can be shown. since often bluebike docks are clustered in high traffic areas like north station, I've layed out the indicators as groups of 3. Dock status comes from the Bluebikes GBFS feed and refreshes every minute. The
+feed has no per-station query, so each refresh downloads the whole system's
+status. The watchface asks Bluebikes' own address for it first, which
+compresses the download to about 18 KB; if that fails it falls back to the
+published Lyft address, which sends the same data as about 234 KB. The
+**Data usage** section at the bottom of the watchface settings shows how much
+has been downloaded today and yesterday.
 
 ![Every Bluebikes dock indicator, enlarged](docs/guide-bikes.png)
 

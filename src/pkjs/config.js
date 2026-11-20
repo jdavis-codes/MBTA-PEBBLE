@@ -164,8 +164,10 @@ function bikeSection(saved) {
 }
 
 // saved: the flat settings Clay keeps in localStorage ('clay-settings').
-function buildConfig(saved) {
+// usage: lines describing how much data has been downloaded, from index.js.
+function buildConfig(saved, usage) {
   saved = saved || {};
+  usage = usage && usage.length ? usage : ['Nothing downloaded yet.'];
   return [
     { type: 'heading', defaultValue: 'MBTA Pebble' },
     {
@@ -202,6 +204,18 @@ function buildConfig(saved) {
     return rowSection(row, i, saved);
   })).concat([
     bikeSection(saved),
+    {
+      type: 'section',
+      items: [
+        { type: 'heading', defaultValue: 'Data usage' },
+        {
+          type: 'text',
+          defaultValue: usage.join('<br>') +
+                        '<br><br>Counted by the watchface on this phone. Your phone\'s ' +
+                        'own cellular data screen shows the total for the Pebble app.'
+        }
+      ]
+    },
     { type: 'submit', defaultValue: 'Save' }
   ]);
 }

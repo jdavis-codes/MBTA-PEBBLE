@@ -390,7 +390,11 @@ module.exports = function() {
   // Bluebikes docks: each slot has a search box that filters the select below it.
   var NUM_BIKES = 9;
   var BIKE_MATCH_LIMIT = 40;
-  var BIKE_INFO_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_information.json';
+  // Bluebikes' own address compresses the download; Lyft's is the fallback.
+  var BIKE_INFO_URLS = [
+    'https://gbfs.bluebikes.com/gbfs/en/station_information.json',
+    'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_information.json'
+  ];
   var bikeStations = null;
 
   function setBikeStatus(text) {
@@ -436,9 +440,11 @@ module.exports = function() {
     setOptions(item, options, current);
   }
 
-  function loadBikeStations() {
+  function loadBikeStations(attempt) {
+    attempt = attempt || 0;
+    var retry = attempt + 1 < BIKE_INFO_URLS.length;
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', BIKE_INFO_URL, true);
+    xhr.open('GET', BIKE_INFO_URLS[attempt], true);
     xhr.onload = function() {
       try {
         bikeStations = JSON.parse(xhr.responseText).data.stations.map(function(s) {
@@ -448,10 +454,12 @@ module.exports = function() {
         });
         setBikeStatus('');
       } catch (e) {
+        if (retry) return loadBikeStations(attempt + 1);
         setBikeStatus('Could not load Bluebikes docks. Check your connection.');
       }
     };
     xhr.onerror = function() {
+      if (retry) return loadBikeStations(attempt + 1);
       setBikeStatus('Could not load Bluebikes docks. Check your connection.');
     };
     xhr.send();
