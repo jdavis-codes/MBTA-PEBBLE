@@ -21,6 +21,9 @@ svg{position:absolute;left:0;top:0}
 .t b{display:block;font-size:22px;margin-bottom:3px}
 .t ul{display:inline-block;margin:2px 0 0;padding-left:1.15em;text-align:left}
 .t li{margin:1px 0}
+li.pic{list-style:none;display:flex;align-items:center;gap:.45em;margin-left:-1.15em}
+.ico{flex:none;display:inline-flex;gap:2px;background:#000;border-radius:.22em;padding:.12em .16em}
+.ico svg{position:static;display:block;width:1.05em;height:1.05em}
 .l{text-align:right}
 /* The narrow page fills the screen width up to 800px and scrolls. */
 .m{width:auto!important;max-width:800px;margin:0 auto;font-size:clamp(15px,3.1vw,25px);line-height:1.34}
@@ -36,6 +39,8 @@ svg{position:absolute;left:0;top:0}
 .m .bk .e:first-of-type{margin-top:.9em}
 .m .tile{flex:none;display:flex;align-items:center;justify-content:center;width:6.2em;height:4.3em;background:#000;border-radius:.4em}
 .m .tile svg{width:auto;height:auto;display:block}
+.m .ico svg{width:1.05em;height:1.05em}
+.m li.pic{margin:.18em 0 .18em -1.15em}
 .m section:last-child{padding-bottom:1.2em}
 .m ul{margin:.1em 0 0;padding-left:1.15em}.m li{margin:.08em 0}
 </style>
@@ -85,9 +90,9 @@ function bikes(key){
 }
 
 // Lines of a body that start with "- " are drawn as a bulleted list.
-var BIKE_DATA='- Solid circle: dock data is up to date.<br>- Pulsing: downloading (every minute).<br>- X: the last download failed.<br>- Hidden when no docks are set.';
-var TRAIN_DATA='- Solid circle: timetables are up to date.<br>- Pulsing: downloading (every 2 minutes).<br>- X: the last download failed.';
-var PHONE='- Filled: Bluetooth connection stable.<br>- Hollow: lost Bluetooth connection.';
+var BIKE_DATA='- [solid] Solid circle: dock data is up to date.<br>- [pulse] Pulsing: downloading (every minute).<br>- [x] X: the last download failed.<br>- Hidden when no docks are set.';
+var TRAIN_DATA='- [solid] Solid circle: timetables are up to date.<br>- [pulse] Pulsing: downloading (every 2 minutes).<br>- [x] X: the last download failed.';
+var PHONE='- [solid] Filled: Bluetooth connection stable.<br>- [hollow] Hollow: lost Bluetooth connection.';
 var GUIDES={
 line:{name:'Line by line',img:'watch-screen.png',y0:224,items:[
  {side:'l',top:1,title:'Bluebikes docks',body:'Each circle is a pie chart for one Bluebikes dock, chosen in the watchface settings. The solid slice is the share of dock slots holding a bike. Orbiting dots are available e-bikes, one dot each.',box:[26.5,-1.5,78,11]},
@@ -116,8 +121,8 @@ mobile:[
  {title:'Service alert',body:'An “!” means an alert is posted for this line. Its text scrolls across the header every minute.',marks:[{circ:[4,92.5,5.5],badge:[2,100.5]}]},
  {title:'End of service',body:'No more trains are scheduled for the rest of the service day.',marks:[{box:[52,104,143.5,123]}]},
  {title:'Bluebikes docks',body:'One shape for each dock. See the Bluebikes indicator guide.',marks:[{box:[1,-1.5,78,11]}]},
- {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[115.5,6,5],badge:[110,15.5]},{circ:[126.5,6,5],badge:[124,15.5]}]},
- {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[137.5,6,5],badge:[139,15.5]}]}
+ {title:'{1} Bike dock data, {2} train data',body:'- [solid] Solid circle: up to date.<br>- [pulse] Pulsing: downloading.<br>- [x] X: the last download failed.',marks:[{circ:[115.5,6,5],badge:[110,15.5]},{circ:[126.5,6,5],badge:[124,15.5]}]},
+ {title:'Phone connection',body:'- [solid] Filled: Bluetooth connected.<br>- [hollow] Hollow: connection lost.',marks:[{circ:[137.5,6,5],badge:[139,15.5]}]}
 ]},
 board:{name:'Departure board',img:'screen-guide-board.png',y0:250,items:[
  {side:'l',top:1,title:'Bluebikes clusters',body:'Each stack is a cluster of nearby Bluebikes docks, chosen in the watchface settings, and each bar is one dock. A bar fills from the left with the share of dock slots holding a bike. A dot to the right of a bar means e-bikes are available.',box:[94.5,1,133.5,22]},
@@ -140,8 +145,8 @@ mobile:[
  {title:'Delayed train',body:'Hatched line: 3 minutes or more behind schedule. The time is the new estimate.',marks:[{box:[0.5,102.5,143.5,123.5]}]},
  {title:'Canceled train',body:'Struck through, with CANC in place of the minutes. Commuter rail only.',marks:[{box:[0.5,58.5,143.5,79.5]}]},
  {title:'Bluebikes clusters',body:'Each stack is a cluster of nearby docks: {1} {2} {3}. See the Bluebikes indicator guide.',marks:[{box:[73.5,1,93.5,22]},{box:[94.5,1,113.5,22]},{box:[114.5,1,133.5,22]}]},
- {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[139,4,4.4]},{circ:[139,12,4.4]}]},
- {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[139,20,4.4]}]}
+ {title:'{1} Bike dock data, {2} train data',body:'- [solid] Solid circle: up to date.<br>- [pulse] Pulsing: downloading.<br>- [x] X: the last download failed.',marks:[{circ:[139,4,4.4]},{circ:[139,12,4.4]}]},
+ {title:'Phone connection',body:'- [solid] Filled: Bluetooth connected.<br>- [hollow] Hollow: connection lost.',marks:[{circ:[139,20,4.4]}]}
 ]},
 dial:{name:'Hour dial',img:'screen-guide-dial.png',y0:150,items:[
  {side:'l',title:'Bluebikes clusters',body:'Three corners each hold one cluster of nearby Bluebikes docks: cluster 1 top left, cluster 2 top right, cluster 3 bottom left. Each bar is one dock and fills from the left with the share of dock slots holding a bike.<br>- A solid bar touching the line is a full dock.<br>- A solid bar with one open cell has one free parking space.',box:[2.5,2.5,23.5,22.5]},
@@ -167,8 +172,8 @@ mobile:[
  {title:'Delayed train',body:'A hollow circle: 3 minutes or more behind schedule.',marks:[{circ:[92,138,6.5]}]},
  {title:'Canceled train',body:'A crossed circle. Commuter rail only.',marks:[{circ:[47.5,32.5,7]}]},
  {title:'Bluebikes clusters',body:'One cluster of nearby docks in each corner: {1} {2} {3}. See the Bluebikes indicator guide.',marks:[{box:[2.5,2.5,23.5,22.5]},{box:[120.5,2.5,141.5,22.5]},{box:[2.5,144.5,23.5,165.5]}]},
- {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[136,144,4.4]},{circ:[136,152,4.4]}]},
- {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[136,160,4.4]}]}
+ {title:'{1} Bike dock data, {2} train data',body:'- [solid] Solid circle: up to date.<br>- [pulse] Pulsing: downloading.<br>- [x] X: the last download failed.',marks:[{circ:[136,144,4.4]},{circ:[136,152,4.4]}]},
+ {title:'Phone connection',body:'- [solid] Filled: Bluetooth connected.<br>- [hollow] Hollow: connection lost.',marks:[{circ:[136,160,4.4]}]}
 ]}
 };
 // The hash picks what is shown:
@@ -195,13 +200,24 @@ if(ALL||parts[1]==='m'){
   wide();
 }
 
+// The status dot in each state, as tiles in status-icons.png (cut from real
+// captures). [pulse] shows two frames of the pulse side by side.
+function icon(name){
+  var tiles={solid:[0],pulse:[1,2],x:[3],hollow:[4]};
+  return '<span class="ico">'+tiles[name].map(function(i){
+    return '<svg viewBox="'+i*9+' 0 9 9"><image href="status-icons.png" width="45" height="9" style="image-rendering:pixelated"/></svg>';
+  }).join('')+'</span>';
+}
 function bodyHtml(text){
   var out='',open=false;
   text.split('<br>').forEach(function(line,i){
     var li=line.indexOf('- ')===0;
     if(li&&!open){out+='<ul>';open=true;}
     if(!li&&open){out+='</ul>';open=false;}
-    out+=li?'<li>'+line.slice(2)+'</li>':(i&&!out.match(/<\/ul>$/)?'<br>':'')+line;
+    // A line that starts with a picture uses it in place of the bullet.
+    var pic=li&&/^- \[(\w+)\] /.exec(line);
+    if(pic) out+='<li class="pic">'+icon(pic[1])+'<span>'+line.slice(pic[0].length)+'</span></li>';
+    else out+=li?'<li>'+line.slice(2)+'</li>':(i&&!out.match(/<\/ul>$/)?'<br>':'')+line;
   });
   return out+(open?'</ul>':'');
 }
