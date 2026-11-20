@@ -60,18 +60,18 @@ line:{name:'Line by line',img:'watch-screen.png',y0:224,items:[
  {side:'r',title:'Subway destination letter',body:'Shown where a line splits.<br>- Red Line southbound: A = Ashmont, B = Braintree.<br>- Green Line: B = Boston College, C = Cleveland Circle, D = Riverside, E = Heath Street.<br>- Other lines have no letter.',circ:[131,155.5,6.5]}
 ],
 mobile:[
- {title:'Bluebikes docks',body:'One shape for each dock. See the Bluebikes indicator guide.',marks:[{box:[1,-1.5,78,11]}]},
- {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[115.5,6,5],badge:[115.5,15.5]},{circ:[126.5,6,5],badge:[126.5,15.5]}]},
- {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[137.5,6,5],badge:[139,15.5]}]},
  {title:'Train timetable header',body:'Station &gt; direction, set in the watchface settings.',marks:[{box:[1,45.5,106,58.5]}]},
  {title:'Departure countdown',body:'Minutes until the next train departs.',marks:[{box:[117,45.5,143,58.5]}]},
+ {title:'Subway timetables',body:'Subway trains are shown as minutes to departure.',marks:[{box:[11.5,145,35,164.5]}]},
+ {title:'Subway destination letter',body:'Shown where a line splits.<br>- Red Line southbound: A = Ashmont, B = Braintree.<br>- Green Line: the B, C, D or E branch.',marks:[{circ:[131,155.5,6.5],badge:[139,148]}]},
  {title:'Blinking departure warning',body:'A train time blinks when it is time to head to the station.',marks:[{box:[0.5,60.5,47.5,85.5]}]},
  {title:'Delayed train',body:'Hatched background: 3 minutes or more behind schedule. The time is the new estimate.',marks:[{box:[96.5,60.5,143.5,85.5]}]},
- {title:'Service alert',body:'An “!” means an alert is posted for this line. Its text scrolls across the header every minute.',marks:[{circ:[4,92.5,5.5],badge:[2,100.5]}]},
  {title:'Canceled train',body:'An X through the time. Commuter rail only.',marks:[{box:[0.5,101.5,48,126],badge:[48,126]}]},
+ {title:'Service alert',body:'An “!” means an alert is posted for this line. Its text scrolls across the header every minute.',marks:[{circ:[4,92.5,5.5],badge:[2,100.5]}]},
  {title:'End of service',body:'No more trains are scheduled for the rest of the service day.',marks:[{box:[52,104,143.5,123]}]},
- {title:'Subway timetables',body:'Subway trains are shown as minutes to departure.',marks:[{box:[11.5,145,35,164.5]}]},
- {title:'Subway destination letter',body:'Shown where a line splits.<br>- Red Line southbound: A = Ashmont, B = Braintree.<br>- Green Line: the B, C, D or E branch.',marks:[{circ:[131,155.5,6.5],badge:[139,148]}]}
+ {title:'Bluebikes docks',body:'One shape for each dock. See the Bluebikes indicator guide.',marks:[{box:[1,-1.5,78,11]}]},
+ {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[115.5,6,5],badge:[110,15.5]},{circ:[126.5,6,5],badge:[124,15.5]}]},
+ {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[137.5,6,5],badge:[139,15.5]}]}
 ]},
 board:{name:'Departure board',img:'screen-guide-board.png',y0:250,items:[
  {side:'l',top:1,title:'Bluebikes clusters',body:'Each stack is a cluster of nearby Bluebikes docks, chosen in the watchface settings, and each bar is one dock. A bar fills from the left with the share of dock slots holding a bike. A dot to the right of a bar means e-bikes are available.',box:[94.5,1,133.5,22]},
@@ -87,15 +87,15 @@ board:{name:'Departure board',img:'screen-guide-board.png',y0:250,items:[
  {side:'r',title:'Delayed train',body:'If a train is marked delayed (3 minutes or more behind schedule), its line is hatched. The time shown is the new estimated departure.',box:[0.5,102.5,143.5,123.5],ty:940}
 ],
 mobile:[
+ {title:'Departure time',body:'When each train leaves. Every train from your stations is in one list, soonest first.',marks:[{box:[0.5,37,38,56.5]}]},
+ {title:'Destination',body:'Where the train is going, shortened to fit. An “!” in front means an alert is posted for its line.',marks:[{box:[44.5,81,119,100.5]}]},
+ {title:'Minutes to departure',body:'Minutes until the train departs.',marks:[{box:[122,37,143.5,56.5]}]},
+ {title:'Blinking departure warning',body:'The whole line blinks when it is time to head to the station.',marks:[{box:[0.5,146.5,143.5,167.5]}]},
+ {title:'Delayed train',body:'Hatched line: 3 minutes or more behind schedule. The time is the new estimate.',marks:[{box:[0.5,102.5,143.5,123.5]}]},
+ {title:'Canceled train',body:'Struck through, with CANC in place of the minutes. Commuter rail only.',marks:[{box:[0.5,58.5,143.5,79.5]}]},
  {title:'Bluebikes clusters',body:'Each stack is a cluster of nearby docks: {1} {2} {3}. See the Bluebikes indicator guide.',marks:[{box:[73.5,1,93.5,22]},{box:[94.5,1,113.5,22]},{box:[114.5,1,133.5,22]}]},
  {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[139,4,4.4]},{circ:[139,12,4.4]}]},
- {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[139,20,4.4]}]},
- {title:'Departure time',body:'When each train leaves. Every train from your stations is in one list, soonest first.',marks:[{box:[0.5,37,38,56.5]}]},
- {title:'Minutes to departure',body:'Minutes until the train departs.',marks:[{box:[122,37,143.5,56.5]}]},
- {title:'Canceled train',body:'Struck through, with CANC in place of the minutes. Commuter rail only.',marks:[{box:[0.5,58.5,143.5,79.5]}]},
- {title:'Destination',body:'Where the train is going, shortened to fit. An “!” in front means an alert is posted for its line.',marks:[{box:[44.5,81,119,100.5]}]},
- {title:'Delayed train',body:'Hatched line: 3 minutes or more behind schedule. The time is the new estimate.',marks:[{box:[0.5,102.5,143.5,123.5]}]},
- {title:'Blinking departure warning',body:'The whole line blinks when it is time to head to the station.',marks:[{box:[0.5,146.5,143.5,167.5]}]}
+ {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[139,20,4.4]}]}
 ]},
 dial:{name:'Hour dial',img:'screen-guide-dial.png',y0:150,items:[
  {side:'l',title:'Bluebikes clusters',body:'Three corners each hold one cluster of nearby Bluebikes docks: cluster 1 top left, cluster 2 top right, cluster 3 bottom left. Each bar is one dock and fills from the left with the share of dock slots holding a bike.<br>- A solid bar touching the line is a full dock.<br>- A solid bar with one open cell has one free parking space.',box:[2.5,2.5,23.5,22.5]},
@@ -112,15 +112,15 @@ dial:{name:'Hour dial',img:'screen-guide-dial.png',y0:150,items:[
  {side:'r',title:'Phone connection',body:PHONE,circ:[136,160,4.4],ty:1165}
 ],
 mobile:[
- {title:'Bluebikes clusters',body:'One cluster of nearby docks in each corner: {1} {2} {3}. See the Bluebikes indicator guide.',marks:[{box:[2.5,2.5,23.5,22.5]},{box:[120.5,2.5,141.5,22.5]},{box:[2.5,144.5,23.5,165.5]}]},
+ {title:'Trains',body:'Each dot is a train, at the minute it departs. Only the next hour is shown.',marks:[{circ:[39,118.8,6.5]}]},
+ {title:'Station rings',body:'One ring for each station: {1} station 1, {2} station 2, {3} station 3.',marks:[{circ:[138.5,98.1,3.2],badge:[136,90.5]},{circ:[125,107.6,3.2],badge:[125,115]},{circ:[100.2,122.8,3.2],badge:[107,129.5]}]},
+ {title:'The hand',body:'Points at the current minute. Trains just clockwise of it leave soonest.',marks:[{circ:[15,94.6,4.5],badge:[15,103]}]},
  {title:'Minutes to departure',body:'Minutes until each station’s next departure. Changes sides at quarter past and quarter to.',marks:[{box:[61,10.5,83,41.5]}]},
- {title:'Canceled train',body:'A crossed circle. Commuter rail only.',marks:[{circ:[46.6,32.8,6.5]}]},
  {title:'The train to leave for',body:'Its dot blinks, and a thin line runs to it from the bar beside the hand.',marks:[{circ:[134.8,58,8]}]},
  {title:'Time left to leave',body:'A bar beside the hand when it is time to head to the station. It shrinks to nothing as the hand closes in.',marks:[{box:[0.5,73,9,95],badge:[5,69]}]},
- {title:'The hand',body:'Points at the current minute. Trains just clockwise of it leave soonest.',marks:[{circ:[15,94.6,4.5],badge:[15,103]}]},
- {title:'Station rings',body:'One ring for each station: {1} station 1, {2} station 2, {3} station 3.',marks:[{circ:[138.5,98.1,3.2],badge:[136,90.5]},{circ:[125,107.6,3.2],badge:[125,115]},{circ:[100.2,122.8,3.2],badge:[107,129.5]}]},
- {title:'Trains',body:'Each dot is a train, at the minute it departs. Only the next hour is shown.',marks:[{circ:[39,118.8,6.5]}]},
  {title:'Delayed train',body:'A hollow circle: 3 minutes or more behind schedule.',marks:[{circ:[91.6,137.5,6.5]}]},
+ {title:'Canceled train',body:'A crossed circle. Commuter rail only.',marks:[{circ:[46.6,32.8,6.5]}]},
+ {title:'Bluebikes clusters',body:'One cluster of nearby docks in each corner: {1} {2} {3}. See the Bluebikes indicator guide.',marks:[{box:[2.5,2.5,23.5,22.5]},{box:[120.5,2.5,141.5,22.5]},{box:[2.5,144.5,23.5,165.5]}]},
  {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[136,144,4.4]},{circ:[136,152,4.4]}]},
  {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[136,160,4.4]}]}
 ]}
@@ -211,12 +211,11 @@ function narrow(key){
       if(m.box) m.b={x1:px(m.box[0]),y1:py(m.box[1]),x2:px(m.box[2]),y2:py(m.box[3])};
       else{var r=m.circ[2]*K;m.b={x1:px(m.circ[0])-r,y1:py(m.circ[1])-r,x2:px(m.circ[0])+r,y2:py(m.circ[1])+r,c:1};}
     });
-    // Marks within the same band of the screen count as level, so they read left to right.
-    e.at=Math.floor(Math.min.apply(null,e.marks.map(function(m){return (m.b.y1+m.b.y2)/2}))/110);
   });
-  // Numbered down the watch, top to bottom. An entry with several marks
-  // numbers them 1.1, 1.2 and so on, and names each one in its text with {1}, {2}.
-  entries.sort(function(a,b){return a.at-b.at||a.marks[0].b.x1-b.marks[0].b.x1});
+  // Entries are numbered in the order they are written: trains first, then what
+  // can happen to a train, then Bluebikes, then the connection dots. An entry
+  // with several marks numbers them 1.1, 1.2 and so on, and names each one in
+  // its text with {1}, {2}.
   function badge(x,y,text){
     var bw=Math.max(2*BR,16+text.length*12);
     x=Math.max(bw/2+2,Math.min(NW-bw/2-2,x));y=Math.max(BR+2,y);
