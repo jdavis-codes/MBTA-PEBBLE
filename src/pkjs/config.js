@@ -24,8 +24,10 @@ function selectOptions(fallback, saved) {
 // Names a saved value that the MBTA lists would otherwise label with its raw id.
 function savedLabel(saved) {
   if (/^Green-[A-Z](,Green-[A-Z])+$/.test(saved)) return 'Green Line';
-  var endpoint = /^0:(.+)$/.exec(saved);
-  if (endpoint) return 'Outbound → ' + endpoint[1] + ' only';
+  var endpoint = /^([01]):(.+)$/.exec(saved);
+  if (endpoint) {
+    return (endpoint[1] === '0' ? 'Outbound' : 'Inbound') + ' → ' + endpoint[2] + ' only';
+  }
   return saved;
 }
 
@@ -47,17 +49,17 @@ function rowSection(row, i, saved) {
       },
       {
         type: 'select',
-        messageKey: 'STOP[' + i + ']',
-        label: 'Station',
-        defaultValue: row.stop.value,
-        options: selectOptions(row.stop, saved['STOP[' + i + ']'])
-      },
-      {
-        type: 'select',
         messageKey: 'DIR[' + i + ']',
         label: 'Direction',
         defaultValue: row.direction.value,
         options: selectOptions(row.direction, saved['DIR[' + i + ']'])
+      },
+      {
+        type: 'select',
+        messageKey: 'STOP[' + i + ']',
+        label: 'Station',
+        defaultValue: row.stop.value,
+        options: selectOptions(row.stop, saved['STOP[' + i + ']'])
       },
       {
         type: 'input',
@@ -194,7 +196,7 @@ function buildConfig(saved) {
         }
       ]
     },
-    { type: 'heading', size: 4, defaultValue: 'Choose up to 3 stations to watch' },
+    { type: 'heading', size: 4, defaultValue: 'Choose up to 3 stations or bus stops to watch' },
     { type: 'text', id: 'mbta-status', defaultValue: 'Loading MBTA lines…' }
   ].concat(ROWS.map(function(row, i) {
     return rowSection(row, i, saved);

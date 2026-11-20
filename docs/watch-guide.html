@@ -1,77 +1,220 @@
 <!doctype html><meta charset="utf-8">
-<!-- Source for the annotated guides. Open with #line (the default), #board
-     or #dial and render #c with a headless browser at 2000px wide:
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MBTA Pebble watch guides</title>
+<!-- Source for the annotated guides. The hash picks the guide: #line (the
+     default), #board or #dial. Render #c with a headless browser.
        #line  -> watch-guide.png   (screen: watch-screen.png)
        #board -> guide-board.png   (screen: screen-guide-board.png)
        #dial  -> guide-dial.png    (screen: screen-guide-dial.png)
+     Add -m for one guide as a narrow page, e.g. #board-m -> guide-board-mobile.png
+     (rendered 800px wide). #pies and #bars are the Bluebikes indicators
+     (-> guide-bikes-pies-mobile.png, guide-bikes-bars-mobile.png; screens:
+     screen-bikes-*.png). #m, or opening the page on a phone, shows every
+     narrow guide on one scrolling page.
      Each screen is a 144x168 capture of the watch showing demo data. -->
 <style>
 body{margin:0;background:#fff;font-family:"DejaVu Sans","Liberation Sans",sans-serif;color:#111}
-#c{position:relative;width:2000px;background:#fff}
+#c{position:relative;background:#fff}
 #w{position:absolute;image-rendering:pixelated;border:8px solid #111;border-radius:12px;margin:-8px}
 svg{position:absolute;left:0;top:0}
-.t{position:absolute;width:470px;font-size:19px;line-height:1.32}
+.t{position:absolute;font-size:19px;line-height:1.32}
 .t b{display:block;font-size:22px;margin-bottom:3px}
-.l{left:20px;text-align:right}.r{left:1510px}
+.t ul{display:inline-block;margin:2px 0 0;padding-left:1.15em;text-align:left}
+.t li{margin:1px 0}
+.l{text-align:right}
+/* The narrow page fills the screen width up to 800px and scrolls. */
+.m{width:auto!important;max-width:800px;margin:0 auto;font-size:clamp(15px,3.1vw,25px);line-height:1.34}
+.m svg{position:static;display:block;width:100%;height:auto}
+.m h2{font-size:1.3em;margin:1.1em 5% .2em}
+.m .list{padding:1.2em 5% .6em}
+.m .e{display:flex;gap:.65em;margin:0 0 .85em}
+.m .e b{display:block;font-size:1.12em;margin-bottom:.08em}
+.m .n{flex:none;box-sizing:border-box;min-width:1.55em;padding:0 .3em;height:1.55em;border-radius:1em;background:#e3121b;color:#fff;font-weight:bold;font-size:.92em;line-height:1.55em;text-align:center;margin-top:.06em}
+.m .k{display:inline-block;background:#e3121b;color:#fff;font-weight:bold;font-size:.8em;line-height:1.5;padding:0 .5em;border-radius:1em;vertical-align:.08em}
+.m .note{margin:.1em 5% 0}
+.m .bk .e{align-items:center;margin:0 5% .6em}
+.m .bk .e:first-of-type{margin-top:.9em}
+.m .tile{flex:none;display:flex;align-items:center;justify-content:center;width:6.2em;height:4.3em;background:#000;border-radius:.4em}
+.m .tile svg{width:auto;height:auto;display:block}
+.m section:last-child{padding-bottom:1.2em}
+.m ul{margin:.1em 0 0;padding-left:1.15em}.m li{margin:.08em 0}
 </style>
-<div id="c"><img id="w" src="watch-screen.png"><svg id="s" width="2000"></svg></div>
+<div id="c"><img id="w" src="watch-screen.png"><svg id="s"></svg></div>
 <script>
 var K=6,X0=568,Y0=224,LX=504,RX=1496,GAP=16;
 function px(x){return X0+x*K} function py(y){return Y0+y*K}
 // Targets are in watch pixels: box [x1,y1,x2,y2] or circ [cx,cy,r].
 // top: the arrow runs across the top margin and drops onto the target.
 // at: [x,y] watch pixel the arrow should end at instead of the nearest edge.
+// The Bluebikes indicators, for the narrow page. Each item is a crop of a
+// 144x168 capture, [capture, x, y, width, height], with a name and what it means.
+function pie(img,slot){return [img,6+13*slot-7,0,14,13]}
+function bar(cluster,i){return ['bars',75+20*cluster,2+6*i,19,7]}
+var BIKES={
+pies:{name:'Bluebikes indicators: line by line',note:'One shape for each dock, along the top left.',items:[
+ [pie('pies',0),'No bikes','An empty ring.'],
+ [pie('pies',1),'A few bikes','The slice is the share of dock slots holding a bike.'],
+ [pie('pies',2),'Half full',''],
+ [pie('pies',3),'Nearly full','Two or more free parking spaces.'],
+ [pie('pies',4),'Almost full','Hollow square: one free parking space.'],
+ [pie('pies',5),'Completely full','Solid square: no free parking space.'],
+ [pie('ebikes',1),'E-bikes','One orbiting dot for each e-bike, up to eight.'],
+ [pie('closed-pies',0),'Out of service','Crossed out: the dock is closed or removed.']
+]},
+bars:{name:'Bluebikes indicators: departure board and hour dial',note:'One bar for each dock, stacked in clusters of nearby docks.',items:[
+ [bar(0,0),'No bikes','An empty outline.'],
+ [bar(0,1),'A few bikes','A bar fills from the left with bikes.'],
+ [bar(0,2),'Half full or more','Two or more free parking spaces.'],
+ [bar(1,1),'Almost full','One open cell at the end: one free parking space.'],
+ [bar(1,2),'Completely full','Solid and touching the line: no free parking space.'],
+ [bar(2,0),'E-bikes','A dot to the right of the bar.'],
+ [['closed-bars',75,2,19,7],'Out of service','An X: the dock is closed or removed.'],
+ [['bars',74,2,20,19],'A cluster','Three nearby docks, joined by a line.']
+]}
+};
+function bikes(key){
+  var g=BIKES[key],h='<section class="g bk" id="'+key+'"><h2>'+g.name+'</h2><p class="note">'+g.note+'</p>';
+  g.items.forEach(function(it){
+    var k=it[0];
+    // The crop is its own small SVG so the pixels stay sharp at any size.
+    h+='<div class="e"><span class="tile"><svg viewBox="'+k[1]+' '+k[2]+' '+k[3]+' '+k[4]+'" style="width:'+(k[3]*(k[4]>14?0.19:0.26)).toFixed(2)+'em">'+
+       '<image href="screen-bikes-'+k[0]+'.png" width="144" height="168" style="image-rendering:pixelated"/></svg></span>'+
+       '<div><b>'+it[1]+'</b>'+it[2]+'</div></div>';
+  });
+  return h+'</section>';
+}
+
+// Lines of a body that start with "- " are drawn as a bulleted list.
+var BIKE_DATA='- Solid circle: dock data is up to date.<br>- Pulsing: downloading (every minute).<br>- X: the last download failed.<br>- Hidden when no docks are set.';
+var TRAIN_DATA='- Solid circle: timetables are up to date.<br>- Pulsing: downloading (every 2 minutes).<br>- X: the last download failed.';
+var PHONE='- Filled: Bluetooth connection stable.<br>- Hollow: lost Bluetooth connection.';
 var GUIDES={
-line:{img:'watch-screen.png',y0:224,items:[
+line:{name:'Line by line',img:'watch-screen.png',y0:224,items:[
  {side:'l',top:1,title:'Bluebikes docks',body:'Each circle is a pie chart for one Bluebikes dock, chosen in the watchface settings. The solid slice is the share of dock slots holding a bike. Orbiting dots are available e-bikes, one dot each.',box:[26.5,-1.5,78,11]},
- {side:'l',title:'Bike dock nearly full',body:'A hollow square means almost full: one free parking space.<br>A solid square means completely full: no free parking space.',box:[1,-1.5,25.5,11],ty:259},
+ {side:'l',title:'Bike dock nearly full',body:'- A hollow square means almost full: one free parking space.<br>- A solid square means completely full: no free parking space.',box:[1,-1.5,25.5,11],ty:259},
  {side:'l',title:'Train timetable header',body:'Station &gt; direction. The line, station and direction are configured in the watchface settings. This example shows commuter rail rows, which display departure times as HH:MM. The watch here is set to a 24-hour clock (military time).',box:[1,45.5,106,58.5]},
  {side:'l',title:'Blinking departure warning',body:'If enabled in the watchface settings, a train time blinks when it is time to head to the station. The blink starts slow at your maximum time to leave, speeds up until your minimum time to leave, then stops.',box:[0.5,60.5,47.5,85.5]},
  {side:'l',title:'Service alert',body:'An “!” means an alert is posted for this line. If alerts are enabled for the row, the alert text scrolls across the header every minute.',circ:[4,92.5,5.5]},
  {side:'l',title:'Canceled train',body:'An X marks a canceled train. Only shown for commuter rail: subway trains are regularly canceled and rescheduled.',box:[0.5,101.5,48,126]},
  {side:'l',title:'Subway timetables',body:'Subway trains depart frequently, so they are shown as minutes to departure.',box:[11.5,145,35,164.5]},
- {side:'r',top:1,title:'Bike dock data',body:'Solid circle: dock data is up to date.<br>Pulsing: downloading (every minute).<br>X: the last download failed.<br>Hidden when no docks are set.',circ:[115.5,6,5]},
- {side:'r',top:2,title:'Train data',body:'Solid circle: timetables are up to date.<br>Pulsing: downloading (every 2 minutes).<br>X: the last download failed.',circ:[126.5,6,5]},
- {side:'r',title:'Phone connection',body:'Filled: Bluetooth connection stable.<br>Hollow: lost Bluetooth connection.',circ:[137.5,6,5],ty:360},
+ {side:'r',top:1,title:'Bike dock data',body:BIKE_DATA,circ:[115.5,6,5]},
+ {side:'r',top:2,title:'Train data',body:TRAIN_DATA,circ:[126.5,6,5]},
+ {side:'r',title:'Phone connection',body:PHONE,circ:[137.5,6,5],ty:360},
  {side:'r',title:'Departure countdown',body:'Minutes until the next train departs.',box:[117,45.5,143,58.5]},
  {side:'r',title:'Delayed trains',body:'If a train is marked delayed (3 minutes or more behind schedule), the background is hatched. The time shown is the new estimated departure.',box:[96.5,60.5,143.5,85.5]},
  {side:'r',title:'End of service',body:'Shows when no more trains are scheduled for the rest of the service day. The MBTA’s service day runs until about 3 am.',box:[52,104,143.5,123]},
- {side:'r',title:'Subway destination letter',body:'Shown where a line splits.<br>Red Line southbound: A = Ashmont, B = Braintree.<br>Green Line: B = Boston College, C = Cleveland Circle, D = Riverside, E = Heath Street.<br>Other lines have no letter.',circ:[131,155.5,6.5]}
+ {side:'r',title:'Subway destination letter',body:'Shown where a line splits.<br>- Red Line southbound: A = Ashmont, B = Braintree.<br>- Green Line: B = Boston College, C = Cleveland Circle, D = Riverside, E = Heath Street.<br>- Other lines have no letter.',circ:[131,155.5,6.5]}
+],
+mobile:[
+ {title:'Train timetable header',body:'Station &gt; direction, set in the watchface settings.',marks:[{box:[1,45.5,106,58.5]}]},
+ {title:'Departure countdown',body:'Minutes until the next train departs.',marks:[{box:[117,45.5,143,58.5]}]},
+ {title:'Subway timetables',body:'Subway trains are shown as minutes to departure.',marks:[{box:[11.5,145,35,164.5]}]},
+ {title:'Subway destination letter',body:'Shown where a line splits.<br>- Red Line southbound: A = Ashmont, B = Braintree.<br>- Green Line: the B, C, D or E branch.',marks:[{circ:[131,155.5,6.5],badge:[139,148]}]},
+ {title:'Blinking departure warning',body:'A train time blinks when it is time to head to the station.',marks:[{box:[0.5,60.5,47.5,85.5]}]},
+ {title:'Delayed train',body:'Hatched background: 3 minutes or more behind schedule. The time is the new estimate.',marks:[{box:[96.5,60.5,143.5,85.5]}]},
+ {title:'Canceled train',body:'An X through the time. Commuter rail only.',marks:[{box:[0.5,101.5,48,126],badge:[48,126]}]},
+ {title:'Service alert',body:'An “!” means an alert is posted for this line. Its text scrolls across the header every minute.',marks:[{circ:[4,92.5,5.5],badge:[2,100.5]}]},
+ {title:'End of service',body:'No more trains are scheduled for the rest of the service day.',marks:[{box:[52,104,143.5,123]}]},
+ {title:'Bluebikes docks',body:'One shape for each dock. See the Bluebikes indicator guide.',marks:[{box:[1,-1.5,78,11]}]},
+ {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[115.5,6,5],badge:[110,15.5]},{circ:[126.5,6,5],badge:[124,15.5]}]},
+ {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[137.5,6,5],badge:[139,15.5]}]}
 ]},
-board:{img:'screen-guide-board.png',y0:250,items:[
+board:{name:'Departure board',img:'screen-guide-board.png',y0:250,items:[
  {side:'l',top:1,title:'Bluebikes clusters',body:'Each stack is a cluster of nearby Bluebikes docks, chosen in the watchface settings, and each bar is one dock. A bar fills from the left with the share of dock slots holding a bike. A dot to the right of a bar means e-bikes are available.',box:[94.5,1,133.5,22]},
- {side:'l',top:2,title:'Bike dock nearly full',body:'A solid bar with one open cell at its end means almost full: one free parking space.<br>A solid bar that touches the cluster’s line means completely full: no free parking space.',box:[73.5,1,93.5,22]},
+ {side:'l',top:2,title:'Bike dock nearly full',body:'- A solid bar with one open cell at its end means almost full: one free parking space.<br>- A solid bar that touches the cluster’s line means completely full: no free parking space.',box:[73.5,1,93.5,22]},
  {side:'l',title:'Departure time',body:'Every train from your three stations is in one list, soonest first, up to six trains. This is when each one leaves. The watch here is set to a 24-hour clock (military time).',box:[0.5,37,38,56.5],ty:520},
  {side:'l',title:'Canceled train',body:'A line through the train, and CANC in place of the minutes. Only shown for commuter rail: subway trains are regularly canceled and rescheduled.',box:[0.5,58.5,143.5,79.5]},
  {side:'l',title:'Blinking departure warning',body:'If enabled in the watchface settings, a train’s whole line blinks when it is time to head to the station. The blink starts slow at your maximum time to leave, speeds up until your minimum time to leave, then stops.',box:[0.5,146.5,143.5,167.5]},
- {side:'r',title:'Connection dots',body:'From top to bottom: bike dock data, train data, phone connection.<br>Solid circle: data is up to date, or Bluetooth is connected.<br>Pulsing: downloading.<br>X: the last download failed.<br>Hollow bottom circle: lost Bluetooth connection.',box:[134.5,-0.5,143.8,24.5],ty:300},
- {side:'r',title:'Minutes to departure',body:'Minutes until the train departs.',box:[122,37,143.5,56.5],ty:520},
+ {side:'r',title:'Bike dock data',body:BIKE_DATA,circ:[139,4,4.4],ty:150},
+ {side:'r',title:'Train data',body:TRAIN_DATA,circ:[139,12,4.4],ty:305},
+ {side:'r',title:'Phone connection',body:PHONE,circ:[139,20,4.4],ty:440},
+ {side:'r',title:'Minutes to departure',body:'Minutes until the train departs.',box:[122,37,143.5,56.5],ty:545},
  {side:'r',title:'Destination',body:'Where the train is going. Long names are shortened to fit: S Station is South Station.<br>An “!” before the destination means an alert is posted for that train’s line, if alerts are enabled for its station. Alert text does not scroll in this layout.',box:[44.5,81,119,100.5]},
  {side:'r',title:'Delayed train',body:'If a train is marked delayed (3 minutes or more behind schedule), its line is hatched. The time shown is the new estimated departure.',box:[0.5,102.5,143.5,123.5],ty:940}
+],
+mobile:[
+ {title:'Departure time',body:'When each train leaves. Every train from your stations is in one list, soonest first.',marks:[{box:[0.5,37,38,56.5]}]},
+ {title:'Destination',body:'Where the train is going, shortened to fit. An “!” in front means an alert is posted for its line.',marks:[{box:[44.5,81,119,100.5]}]},
+ {title:'Minutes to departure',body:'Minutes until the train departs.',marks:[{box:[122,37,143.5,56.5]}]},
+ {title:'Blinking departure warning',body:'The whole line blinks when it is time to head to the station.',marks:[{box:[0.5,146.5,143.5,167.5]}]},
+ {title:'Delayed train',body:'Hatched line: 3 minutes or more behind schedule. The time is the new estimate.',marks:[{box:[0.5,102.5,143.5,123.5]}]},
+ {title:'Canceled train',body:'Struck through, with CANC in place of the minutes. Commuter rail only.',marks:[{box:[0.5,58.5,143.5,79.5]}]},
+ {title:'Bluebikes clusters',body:'Each stack is a cluster of nearby docks: {1} {2} {3}. See the Bluebikes indicator guide.',marks:[{box:[73.5,1,93.5,22]},{box:[94.5,1,113.5,22]},{box:[114.5,1,133.5,22]}]},
+ {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[139,4,4.4]},{circ:[139,12,4.4]}]},
+ {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[139,20,4.4]}]}
 ]},
-dial:{img:'screen-guide-dial.png',y0:150,items:[
- {side:'l',title:'Bluebikes clusters',body:'Three corners each hold one cluster of nearby Bluebikes docks: cluster 1 top left, cluster 2 top right, cluster 3 bottom left. Each bar is one dock and fills from the left with the share of dock slots holding a bike. A solid bar touching the line is a full dock. A solid bar with one open cell has one free parking space.',box:[2.5,2.5,23.5,22.5]},
- {side:'l',title:'Canceled train',body:'A crossed circle marks a canceled train. Only shown for commuter rail: subway trains are regularly canceled and rescheduled.',circ:[46.6,32.8,6.5]},
+dial:{name:'Hour dial',img:'screen-guide-dial.png',y0:150,items:[
+ {side:'l',title:'Bluebikes clusters',body:'Three corners each hold one cluster of nearby Bluebikes docks: cluster 1 top left, cluster 2 top right, cluster 3 bottom left. Each bar is one dock and fills from the left with the share of dock slots holding a bike.<br>- A solid bar touching the line is a full dock.<br>- A solid bar with one open cell has one free parking space.',box:[2.5,2.5,23.5,22.5]},
+ {side:'l',title:'Canceled train',body:'A crossed circle marks a canceled train. Only shown for commuter rail: subway trains are regularly canceled and rescheduled.',circ:[47.5,32.5,7]},
  {side:'l',title:'Time left to leave',body:'If the departure warning is enabled in the watchface settings, a bar appears beside the hand when it is time to head to the station. It ends where the hand will be at your minimum time to leave, so it shrinks to nothing as the hand closes in. It pulses between bold and thin.',box:[0.5,73,9,95]},
  {side:'l',title:'The hand',body:'The thin hand points at the current minute, like the minute hand of a clock. Trains just clockwise of it leave soonest.',circ:[15,94.6,4.5],ty:850},
- {side:'l',title:'Trains',body:'Each dot is a train, placed at the minute it departs. Only trains in the next hour are shown.',circ:[39,118.8,6.5],ty:1000},
+ {side:'l',title:'Trains',body:'Each dot is a train, placed at the minute it departs. Only trains in the next hour are shown.',circ:[38.5,117.5,6.5],ty:1000},
  {side:'r',top:1,title:'Minutes to departure',body:'Minutes until each station’s next train. The number furthest from the center belongs to the outer ring. The numbers sit on the far side from the hand: above the center from quarter past until quarter to, below it for the rest of the hour.',box:[61,10.5,83,41.5]},
- {side:'r',title:'The train to leave for',body:'The dot of the train you should leave for blinks, and a thin line runs to it from the end of the bar beside the hand.',circ:[134.8,58,8]},
+ {side:'r',title:'The train to leave for',body:'The dot of the train you should leave for blinks, and a thin line runs to it from the end of the bar beside the hand.',circ:[135.5,61.5,8.5]},
  {side:'r',title:'Station rings',body:'One ring for each station, in the order set in the watchface settings. The first station is the outer ring.',box:[115,100,143,111]},
- {side:'r',title:'Delayed train',body:'A hollow circle marks a train running 3 minutes or more behind schedule. It sits at its new estimated departure.',circ:[91.6,137.5,6.5],ty:960},
- {side:'r',title:'Connection dots',body:'From top to bottom: bike dock data, train data, phone connection.<br>Solid circle: data is up to date, or Bluetooth is connected.<br>Pulsing: downloading.<br>X: the last download failed.<br>Hollow bottom circle: lost Bluetooth connection.',box:[131.5,140.5,142.5,166.5],ty:1130}
+ {side:'r',title:'Delayed train',body:'A hollow circle marks a train running 3 minutes or more behind schedule. It sits at its new estimated departure.',circ:[92,138,6.5],ty:790},
+ {side:'r',title:'Bike dock data',body:BIKE_DATA,circ:[136,144,4.4],ty:925},
+ {side:'r',title:'Train data',body:TRAIN_DATA,circ:[136,152,4.4],ty:1062},
+ {side:'r',title:'Phone connection',body:PHONE,circ:[136,160,4.4],ty:1165}
+],
+mobile:[
+ {title:'Trains',body:'Each dot is a train, at the minute it departs. Only the next hour is shown.',marks:[{circ:[38.5,117.5,6.5]}]},
+ {title:'Station rings',body:'One ring for each station: {1} station 1, {2} station 2, {3} station 3.',marks:[{circ:[38,142.9,3.2],badge:[31,150]},{circ:[43,134.2,3.2],badge:[51.5,139.5]},{circ:[48,125.6,3.2],badge:[56.5,130]}]},
+ {title:'The hand',body:'Points at the current minute. Trains just clockwise of it leave soonest.',marks:[{circ:[15,94.6,4.5],badge:[15,103]}]},
+ {title:'Minutes to departure',body:'Minutes until each station’s next departure. Changes sides at quarter past and quarter to.',marks:[{box:[61,10.5,83,41.5]}]},
+ {title:'The train to leave for',body:'Its dot blinks, and a thin line runs to it from the bar beside the hand.',marks:[{circ:[135.5,61.5,8.5]}]},
+ {title:'Time left to leave',body:'A bar beside the hand when it is time to head to the station. It shrinks to nothing as the hand closes in.',marks:[{box:[0.5,73,9,95],badge:[5,69]}]},
+ {title:'Delayed train',body:'A hollow circle: 3 minutes or more behind schedule.',marks:[{circ:[92,138,6.5]}]},
+ {title:'Canceled train',body:'A crossed circle. Commuter rail only.',marks:[{circ:[47.5,32.5,7]}]},
+ {title:'Bluebikes clusters',body:'One cluster of nearby docks in each corner: {1} {2} {3}. See the Bluebikes indicator guide.',marks:[{box:[2.5,2.5,23.5,22.5]},{box:[120.5,2.5,141.5,22.5]},{box:[2.5,144.5,23.5,165.5]}]},
+ {title:'{1} Bike dock data, {2} train data',body:'- Solid circle: up to date.<br>- Pulsing: downloading.<br>- X: the last download failed.',marks:[{circ:[136,144,4.4]},{circ:[136,152,4.4]}]},
+ {title:'Phone connection',body:'- Filled: Bluetooth connected.<br>- Hollow: connection lost.',marks:[{circ:[136,160,4.4]}]}
 ]}
 };
-var guide=GUIDES[location.hash.slice(1)]||GUIDES.line,items=guide.items;
-Y0=guide.y0;document.getElementById('w').src=guide.img;
-var R='#e3121b',c=document.getElementById('c'),w=document.getElementById('w');
-w.style.left=X0+'px';w.style.top=Y0+'px';w.style.width=144*K+'px';w.style.height=168*K+'px';
+// The hash picks what is shown:
+//   #board     the wide guide, callouts on both sides (also #line, #dial)
+//   #board-m   that guide as a narrow page: numbered markers, shorter list
+//   #m         every narrow guide on one scrolling page, each layout followed
+//              by its Bluebikes indicators; this is also what a phone gets
+//              when the page is opened without a hash.
+//   #pies, #bars   one set of Bluebikes indicators as a narrow page
+var hash=location.hash.slice(1),parts=hash.split('-');
+var ALL=hash==='m'||(!hash&&Math.min(window.innerWidth,screen.width)<900);
+var guide=GUIDES[parts[0]]||GUIDES.line,items=guide.items;
+if(BIKES[parts[0]])parts[1]='m';
+var c=document.getElementById('c'),w=document.getElementById('w'),R='#e3121b';
+var W=2000,TW=470,TL=20,TR=1510;
+if(ALL||parts[1]==='m'){
+  w.remove();document.getElementById('s').remove();c.className='m';
+  // The Bluebikes indicators follow the layouts that use them.
+  var show=function(key){return BIKES[key]?bikes(key):narrow(key)};
+  c.innerHTML=(ALL?['line','pies','board','dial','bars']:[parts[0]]).map(show).join('');
+}else{
+  c.style.width=W+'px';w.src=guide.img;Y0=guide.y0;
+  w.style.left=X0+'px';w.style.top=Y0+'px';w.style.width=144*K+'px';w.style.height=168*K+'px';
+  wide();
+}
+
+function bodyHtml(text){
+  var out='',open=false;
+  text.split('<br>').forEach(function(line,i){
+    var li=line.indexOf('- ')===0;
+    if(li&&!open){out+='<ul>';open=true;}
+    if(!li&&open){out+='</ul>';open=false;}
+    out+=li?'<li>'+line.slice(2)+'</li>':(i&&!out.match(/<\/ul>$/)?'<br>':'')+line;
+  });
+  return out+(open?'</ul>':'');
+}
+function wide(){
+items.forEach(function(it){
+  it.el=document.createElement('div');it.el.className='t '+it.side;
+  it.el.style.width=TW+'px';it.el.style.left=(it.side==='l'?TL:TR)+'px';
+  it.el.innerHTML='<b>'+it.title+'</b>'+bodyHtml(it.body);c.appendChild(it.el);
+  it.h=it.el.offsetHeight;
+});
 items.forEach(function(it){
   if(it.box) it.b={x1:px(it.box[0]),y1:py(it.box[1]),x2:px(it.box[2]),y2:py(it.box[3])};
   else{var r=it.circ[2]*K;it.b={x1:px(it.circ[0])-r,y1:py(it.circ[1])-r,x2:px(it.circ[0])+r,y2:py(it.circ[1])+r,c:1};}
-  it.el=document.createElement('div');it.el.className='t '+it.side;
-  it.el.innerHTML='<b>'+it.title+'</b>'+it.body;c.appendChild(it.el);
-  it.h=it.el.offsetHeight;
   it.want=it.top?it.top:(it.ty||(it.b.y1+it.b.y2)/2);
 });
 var H=Y0+168*K+40;
@@ -81,6 +224,8 @@ var H=Y0+168*K+40;
     it.y=Math.max(it.want,it.h/2+16);
     if(i>0){var p=col[i-1],min=p.y+p.h/2+GAP+it.h/2;if(it.y<min)it.y=min;}
   });
+  // A column taller than the watch makes the picture taller instead of overlapping.
+  if(col.length){var last=col[col.length-1];H=Math.max(H,last.y+last.h/2+16);}
   for(var i=col.length-1;i>=0;i--){
     var max=i===col.length-1?H-16-col[i].h/2:col[i+1].y-col[i+1].h/2-GAP-col[i].h/2;
     if(col[i].y>max)col[i].y=max;
@@ -102,5 +247,56 @@ items.forEach(function(it){
   }
   svg+='<path d="'+d+'" fill="none" stroke="'+R+'" stroke-width="4.5" stroke-linejoin="round" marker-end="url(#a)"/>';
 });
-c.style.height=H+'px';var s=document.getElementById('s');s.setAttribute('height',H);s.innerHTML=svg;
+c.style.height=H+'px';var sv=document.getElementById('s');sv.setAttribute('width',W);sv.setAttribute('height',H);sv.innerHTML=svg;
+}
+
+// The narrow page. Everything on the watch is drawn inside one SVG with a
+// fixed 800-unit-wide coordinate system, so the picture and its markers scale
+// together to the width of the screen; the list underneath is ordinary text.
+function narrow(key){
+  var g=GUIDES[key],NW=800,BR=17;
+  K=5;X0=40;Y0=34;
+  var entries=g.mobile;
+  entries.forEach(function(e){
+    e.marks.forEach(function(m){
+      if(m.box) m.b={x1:px(m.box[0]),y1:py(m.box[1]),x2:px(m.box[2]),y2:py(m.box[3])};
+      else{var r=m.circ[2]*K;m.b={x1:px(m.circ[0])-r,y1:py(m.circ[1])-r,x2:px(m.circ[0])+r,y2:py(m.circ[1])+r,c:1};}
+    });
+  });
+  // Entries are numbered in the order they are written: trains first, then what
+  // can happen to a train, then Bluebikes, then the connection dots. An entry
+  // with several marks numbers them 1.1, 1.2 and so on, and names each one in
+  // its text with {1}, {2}.
+  function badge(x,y,text){
+    var bw=Math.max(2*BR,16+text.length*12);
+    x=Math.max(bw/2+2,Math.min(NW-bw/2-2,x));y=Math.max(BR+2,y);
+    return '<rect x="'+(x-bw/2)+'" y="'+(y-BR)+'" width="'+bw+'" height="'+2*BR+'" rx="'+BR+'" fill="'+R+'" stroke="#fff" stroke-width="2.5"/>'+
+           '<text x="'+x+'" y="'+(y+7.5)+'" text-anchor="middle" font-size="22" font-weight="bold" fill="#fff">'+text+'</text>';
+  }
+  var SH=Y0+168*K+30;
+  var svg='<rect x="'+(X0-8)+'" y="'+(Y0-8)+'" width="'+(144*K+16)+'" height="'+(168*K+16)+'" rx="12" fill="#111"/>'+
+          '<image href="'+g.img+'" x="'+X0+'" y="'+Y0+'" width="'+144*K+'" height="'+168*K+'" style="image-rendering:pixelated"/>';
+  var list='',badges='';
+  entries.forEach(function(e,i){
+    function inline(text){
+      return text.replace(/\{(\d)\}/g,function(_,k){return '<span class="k">'+(i+1)+'.'+k+'</span>'});
+    }
+    e.marks.forEach(function(m,k){
+      var b=m.b,cx=(b.x1+b.x2)/2,cy=(b.y1+b.y2)/2,r=(b.x2-b.x1)/2,bx,by;
+      var text=(i+1)+(e.marks.length>1?'.'+(k+1):'');
+      if(b.c) svg+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+R+'" stroke-width="5"/>';
+      else svg+='<rect x="'+b.x1+'" y="'+b.y1+'" width="'+(b.x2-b.x1)+'" height="'+(b.y2-b.y1)+'" rx="6" fill="none" stroke="'+R+'" stroke-width="5"/>';
+      // The marker sits on the shape's top left corner, or beside a small circle.
+      if(m.badge){bx=px(m.badge[0]);by=py(m.badge[1]);}
+      else if(b.c&&r<30){bx=cx-r-(16+text.length*12)/2-2;by=cy;}
+      else if(b.c){bx=cx-r*0.72;by=cy-r*0.72;}
+      else{bx=b.x1;by=b.y1;}
+      badges+=badge(bx,by,text);
+    });
+    list+='<div class="e"><span class="n">'+(i+1)+'</span><div><b>'+inline(e.title)+'</b>'+bodyHtml(inline(e.body))+'</div></div>';
+  });
+  return '<section class="g"'+(g.name?' id="'+key+'"':'')+'>'+(ALL?'<h2>'+g.name+'</h2>':'')+
+         '<svg viewBox="0 0 '+NW+' '+SH+'" xmlns="http://www.w3.org/2000/svg">'+svg+badges+'</svg>'+
+         '<div class="list">'+list+'</div></section>';
+}
 </script>

@@ -1,12 +1,13 @@
 // Runs inside the Clay settings page, not in PebbleKit JS. Clay serialises this
 // function into the page, so it must not reference anything outside itself.
-// It turns the Line/Station/Direction selects into a cascade loaded live from
+// It turns the Line/Direction/Station selects into a cascade loaded live from
 // the MBTA API, and fills in the row label when the user changes a row.
 module.exports = function() {
   var clayConfig = this;
   var API = 'https://api-v3.mbta.com';
   var NUM_ROWS = 3;
   var LABEL_MAX = 23;
+  var BUS_TYPE = 3;
   // Roughly how many characters fit beside the countdown in the watch header.
   var LABEL_FIT = 17;
   var ABBREVIATIONS = [
@@ -45,6 +46,7 @@ module.exports = function() {
 
   var routes = {};
   var stopsByRoute = {};
+  var busDestinations = {};
   // Set while options are replaced in code so listeners can ignore those changes.
   var programmatic = false;
 
@@ -140,11 +142,23 @@ module.exports = function() {
     var route = routes[routeId];
     var stopName = selectedText(rowItem('STOP', row));
     if (!route || !stopName) return;
+    // A direction value is "0", or "0:<endpoint name>" for a single endpoint.
+    var parts = rowItem('DIR', row).get().split(':');
+    if (route.type === BUS_TYPE) {
+      // Bus stop names are long, so the header is the route number and where
+      // the bus is heading, e.g. "66 > HARVARD SQ".
+      stopName = parts.length > 1 ? parts.slice(1).join(':')
+                                  : route.direction_destinations[parts[0]] || '';
+    }
     ABBREVIATIONS.forEach(function(a) {
       stopName = stopName.replace(a[0], a[1]);
     });
-    // A direction value is "0", or "0:<endpoint name>" for a single endpoint.
-    var parts = rowItem('DIR', row).get().split(':');
+    if (route.type === BUS_TYPE) {
+      var number = route.short_name || routeId;
+      stopName = stopName.substring(0, Math.max(LABEL_FIT - 3 - number.length, 4)).trim();
+      rowItem('LABEL', row).set((number + ' > ' + stopName).toUpperCase().substring(0, LABEL_MAX));
+      return;
+    }
     var isEndpoint = parts.length > 1;
     var dirName = route.direction_names[parts[0]] || '';
     var dir = dirName === 'Outbound' ? 'OUT' : dirName === 'Inbound' ? 'IN' : dirName;
@@ -158,32 +172,88 @@ module.exports = function() {
     rowItem('LABEL', row).set((stopName + ' > ' + dir).toUpperCase().substring(0, LABEL_MAX));
   }
 
-  // Outbound gets an extra option per endpoint so a row can show just one branch.
+  // A direction that splits gets an extra option per destination, so a row
+  // can show just one branch: commuter rail outbound, and either way on a bus.
   function directionOptions(routeId, route) {
-    var options = [{
-      value: '0',
-      label: route.direction_names[0] + ' → ' + route.direction_destinations[0]
-    }];
-    (COMMUTER_ENDPOINTS[routeId] || []).forEach(function(endpoint) {
+    var options = [];
+    ['0', '1'].forEach(function(dir) {
       options.push({
-        value: '0:' + endpoint.name,
-        label: route.direction_names[0] + ' → ' + endpoint.name + ' only'
+        value: dir,
+        label: route.direction_names[dir] + ' → ' + route.direction_destinations[dir]
+      });
+      var names = dir === '0' ? (COMMUTER_ENDPOINTS[routeId] || []).map(function(e) {
+        return e.name;
+      }) : [];
+      if (busDestinations[routeId]) names = busDestinations[routeId][dir];
+      names.forEach(function(name) {
+        options.push({
+          value: dir + ':' + name,
+          label: route.direction_names[dir] + ' → ' + name + ' only'
+        });
       });
     });
-    options.push({
-      value: '1',
-      label: route.direction_names[1] + ' → ' + route.direction_destinations[1]
-    });
     return options;
+  }
+
+  // Where a bus route's regular buses go in each direction, from the MBTA's
+  // route patterns. A direction with a single destination gets no extra options.
+  function loadBusDestinations(routeId, callback) {
+    if (busDestinations[routeId]) {
+      callback();
+      return;
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', API + '/route_patterns?filter[route]=' + encodeURIComponent(routeId) +
+             '&include=representative_trip&fields[trip]=headsign' +
+             '&fields[route_pattern]=typicality,direction_id', true);
+    xhr.onload = function() {
+      var found = { '0': [], '1': [] };
+      try {
+        var json = JSON.parse(xhr.responseText);
+        var headsigns = {};
+        (json.included || []).forEach(function(trip) {
+          headsigns[trip.id] = trip.attributes.headsign;
+        });
+        json.data.forEach(function(pattern) {
+          // Typicality 1 and 2 are the usual patterns and their regular variations.
+          if (pattern.attributes.typicality > 2) return;
+          var trip = pattern.relationships.representative_trip.data;
+          var name = trip && headsigns[trip.id];
+          var list = found[String(pattern.attributes.direction_id)];
+          if (name && list && list.indexOf(name) < 0) list.push(name);
+        });
+      } catch (e) {
+        found = { '0': [], '1': [] };
+      }
+      ['0', '1'].forEach(function(dir) {
+        if (found[dir].length < 2) found[dir] = [];
+      });
+      busDestinations[routeId] = found;
+      callback();
+    };
+    // Without the list the route still works, just without the "only" options.
+    xhr.onerror = function() {
+      callback();
+    };
+    xhr.send();
   }
 
   function isGreenBranch(routeId) {
     return routeId.indexOf(GREEN_PREFIX) === 0 && routeId.indexOf(',') < 0;
   }
 
-  function loadStops(routeId, callback) {
-    if (stopsByRoute[routeId]) {
-      callback(stopsByRoute[routeId]);
+  // MBTA route type 3 is a bus.
+  function isBus(routeId) {
+    return !!routes[routeId] && routes[routeId].type === BUS_TYPE;
+  }
+
+  // A train station serves both directions, so one list does for the line. A
+  // bus stops on opposite sides of the street, so each direction has its own.
+  function loadStops(routeId, dir, callback) {
+    var stopDir = isBus(routeId) ? dir : '0';
+    var key = isBus(routeId) ? routeId + '|' + stopDir : routeId;
+    if (stopsByRoute[key]) {
+      callback(stopsByRoute[key]);
       return;
     }
     if (routeId.indexOf(',') >= 0) {
@@ -191,13 +261,13 @@ module.exports = function() {
       return;
     }
     apiGet('/stops?filter[route]=' + encodeURIComponent(routeId) +
-           '&filter[direction_id]=0&fields[stop]=name', function(data) {
+           '&filter[direction_id]=' + stopDir + '&fields[stop]=name', function(data) {
       if (data) {
-        stopsByRoute[routeId] = data.map(function(stop) {
+        stopsByRoute[key] = data.map(function(stop) {
           return { value: stop.id, label: stop.attributes.name };
         });
       }
-      callback(stopsByRoute[routeId] || null);
+      callback(stopsByRoute[key] || null);
     });
   }
 
@@ -209,7 +279,7 @@ module.exports = function() {
     var pending = branchIds.length;
     var failed = false;
     branchIds.forEach(function(branchId, i) {
-      loadStops(branchId, function(stops) {
+      loadStops(branchId, '0', function(stops) {
         if (!stops) failed = true;
         lists[i] = stops || [];
         if (--pending > 0) return;
@@ -270,15 +340,38 @@ module.exports = function() {
     if (routeId === '') {
       setOptions(rowItem('STOP', row), [NONE_OPTION], '');
       setOptions(rowItem('DIR', row), [NONE_OPTION], '');
+      setStopLabel(row, 'Station');
       if (byUser) rowItem('LABEL', row).set('');
       return;
     }
     var route = routes[routeId];
     if (!route) return;
-    setOptions(rowItem('DIR', row), directionOptions(routeId, route), rowItem('DIR', row).get());
-    loadStops(routeId, function(stops) {
-      // Ignore results for a line the user has already switched away from.
-      if (rowItem('ROUTE', row).get() !== routeId) return;
+    if (isBus(routeId) && !busDestinations[routeId]) {
+      loadBusDestinations(routeId, function() {
+        // Ignore the result if the user has already switched lines.
+        if (rowItem('ROUTE', row).get() === routeId) showDirections(row, byUser);
+      });
+      return;
+    }
+    showDirections(row, byUser);
+  }
+
+  function showDirections(row, byUser) {
+    var routeId = rowItem('ROUTE', row).get();
+    setOptions(rowItem('DIR', row), directionOptions(routeId, routes[routeId]),
+               rowItem('DIR', row).get());
+    onDirectionChanged(row, byUser);
+  }
+
+  // Loads the stations, or for a bus the stops on the chosen direction's side.
+  function onDirectionChanged(row, byUser) {
+    var routeId = rowItem('ROUTE', row).get();
+    var dir = rowItem('DIR', row).get().split(':')[0];
+    setStopLabel(row, isBus(routeId) ? 'Stop' : 'Station');
+    loadStops(routeId, dir, function(stops) {
+      // Ignore results for a line or direction the user has already left.
+      if (rowItem('ROUTE', row).get() !== routeId ||
+          rowItem('DIR', row).get().split(':')[0] !== dir) return;
       if (!stops) {
         setStatus('Could not load stations from the MBTA. Check your connection.');
         return;
@@ -286,6 +379,12 @@ module.exports = function() {
       setOptions(rowItem('STOP', row), stops, rowItem('STOP', row).get());
       if (byUser) updateLabel(row);
     });
+  }
+
+  // The third picker is a Station for trains and a Stop for buses.
+  function setStopLabel(row, text) {
+    var label = rowItem('STOP', row).$element[0].querySelector('.label');
+    if (label) label.textContent = text;
   }
 
   // Bluebikes docks: each slot has a search box that filters the select below it.
@@ -380,13 +479,18 @@ module.exports = function() {
           if (!programmatic) updateLabel(r);
         });
         rowItem('DIR', r).on('change', function() {
-          if (!programmatic) updateLabel(r);
+          if (programmatic) return;
+          if (isBus(rowItem('ROUTE', r).get())) {
+            onDirectionChanged(r, true);
+          } else {
+            updateLabel(r);
+          }
         });
       })(row);
     }
 
-    apiGet('/routes?filter[type]=0,1,2&sort=sort_order' +
-           '&fields[route]=long_name,type,direction_names,direction_destinations',
+    apiGet('/routes?filter[type]=0,1,2,3&sort=sort_order' +
+           '&fields[route]=long_name,short_name,type,direction_names,direction_destinations',
     function(data) {
       if (!data) {
         setStatus('Could not load lines from the MBTA. Check your connection.');
@@ -394,9 +498,15 @@ module.exports = function() {
       }
       var subway = [];
       var commuter = [];
+      var bus = [];
       var greenIds = [];
       data.forEach(function(r) {
         routes[r.id] = r.attributes;
+        if (r.attributes.type === BUS_TYPE) {
+          // Buses are known by number; the long name says where the route runs.
+          bus.push({ value: r.id, label: r.attributes.short_name + ' · ' + r.attributes.long_name });
+          return;
+        }
         if (isGreenBranch(r.id)) {
           greenIds.push(r.id);
           if (greenIds.length > 1) return;
@@ -417,7 +527,8 @@ module.exports = function() {
       var groups = [
         NONE_OPTION,
         { label: 'Subway', options: subway },
-        { label: 'Commuter Rail', options: commuter }
+        { label: 'Commuter Rail', options: commuter },
+        { label: 'Bus', options: bus }
       ];
       for (var row = 0; row < NUM_ROWS; row++) {
         var saved = rowItem('ROUTE', row).get();

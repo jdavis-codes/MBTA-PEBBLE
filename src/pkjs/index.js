@@ -21,6 +21,8 @@ var MODE_CLOCK = 0;
 var MODE_MINUTES = 1;
 // A station nobody has chosen yet.
 var MODE_UNSET = 2;
+// Minutes to departure, for a bus: the watch says "buses" where it would say "trains".
+var MODE_BUS = 3;
 // Per-departure status letters; must match FLAG_* in src/c/watchface.c.
 var FLAG_NONE = ' ';
 var FLAG_CANCELLED = 'X';
@@ -240,6 +242,12 @@ function isCommuterRail(route) {
   return route.indexOf('CR-') === 0;
 }
 
+// Subway and light rail routes are named; everything else offered is a bus,
+// whose route ids are numbers such as "66" or "741".
+function isBus(route) {
+  return !isCommuterRail(route) && !/^(Red|Orange|Blue|Mattapan|Green-)/.test(route);
+}
+
 // Some trains stop at an endpoint without ending there, so they count toward it too.
 // Wickford Junction trains stop at Providence; Foxboro shuttles are headed to Foxboro.
 var SERVED_HEADSIGNS = {
@@ -363,6 +371,24 @@ function fetchSubway(row, callback) {
   });
 }
 
+// Bus rows that have had buses to more than one destination, keyed by
+// "route|stop|direction|destination". Once seen, the row keeps its letters even while the
+// next few buses happen to share a destination.
+var s_busSplit = {};
+
+// Tags each bus with the first letter of its destination where a route splits.
+function tagBusDestinations(row, trains) {
+  var key = row.route + '|' + row.stop + '|' + row.direction + '|' + (row.destination || '');
+  var seen = {};
+  trains.forEach(function(train) { seen[train.headsign] = true; });
+  if (Object.keys(seen).length > 1) s_busSplit[key] = true;
+  if (!s_busSplit[key]) return;
+  trains.forEach(function(train) {
+    var letter = train.headsign.charAt(0).toUpperCase();
+    train.dest = /[A-Z0-9]/.test(letter) ? letter : NO_BRANCH;
+  });
+}
+
 function fetchPredictions(row, showBranches, callback) {
   apiGet('/predictions', {
     'filter[stop]': row.stop,
@@ -377,6 +403,7 @@ function fetchPredictions(row, showBranches, callback) {
     if (err) return callback(err);
     var included = indexIncluded(json);
     var nowSec = Math.floor(Date.now() / 1000);
+    var bus = isBus(row.route);
     var trains = [];
     json.data.forEach(function(pred) {
       var a = pred.attributes;
@@ -388,14 +415,18 @@ function fetchPredictions(row, showBranches, callback) {
       var dest = NO_BRANCH;
       var rel = pred.relationships || {};
       var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
+      var headsign = trip ? trip.attributes.headsign : '';
+      // A bus row set to one destination only keeps the buses going there.
+      if (bus && row.destination && headsign !== row.destination) return;
       if (showBranches) {
-        dest = branchLetter(rel.route && rel.route.data ? rel.route.data.id : '',
-                            trip ? trip.attributes.headsign : '');
+        dest = branchLetter(rel.route && rel.route.data ? rel.route.data.id : '', headsign);
       }
-      trains.push({ time: t, dest: dest, to: shortDest(trip && trip.attributes.headsign) });
+      trains.push({ time: t, dest: dest, to: shortDest(headsign), headsign: headsign });
     });
     trains.sort(function(x, y) { return x.time - y.time; });
-    callback(null, { mode: MODE_MINUTES, trains: trains.slice(0, MAX_TIMES) });
+    trains = trains.slice(0, MAX_TIMES);
+    if (bus) tagBusDestinations(row, trains);
+    callback(null, { mode: bus ? MODE_BUS : MODE_MINUTES, trains: trains });
   });
 }
 
@@ -463,8 +494,12 @@ function hasBikes(ids) {
 // One dock as the watch's two status characters: a letter for how many eighths
 // of the dock's spaces hold a rentable bike, then a digit for how many of
 // those are e-bikes (at most BIKE_MAX_EBIKES).
+// Must match BIKE_CLOSED in src/c/watchface.c: the level letter after full.
+var BIKE_CLOSED = String.fromCharCode('a'.charCodeAt(0) + BIKE_LEVELS + 3);
+
 function bikeLetter(station) {
-  if (!station || !station.is_installed || !station.is_renting) return 'a0';
+  // A dock that is out of service, or gone from the feed altogether.
+  if (!station || !station.is_installed || !station.is_renting) return BIKE_CLOSED + '0';
   var bikes = station.num_bikes_available || 0;
   var total = bikes + (station.num_bikes_disabled || 0) +
               (station.num_docks_available || 0) + (station.num_docks_disabled || 0);
@@ -780,6 +815,7 @@ if (typeof module !== 'undefined') {
   module.exports = {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
     alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
+    tagBusDestinations: tagBusDestinations,
     shortDest: shortDest
   };
 }

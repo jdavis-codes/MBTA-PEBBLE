@@ -9,7 +9,7 @@ h2{font-size:24px;margin:0 0 4px}
 p.note{font-size:18px;line-height:1.35;margin:0 0 16px;max-width:1500px}
 .row{display:flex;gap:14px;margin-bottom:30px;align-items:flex-start}
 .row:last-child{margin-bottom:0}
-.it{width:178px;flex:none}
+.it{width:160px;flex:none}
 .tile{height:124px;background:#000;border-radius:8px;display:flex;align-items:center;justify-content:center}
 .px{image-rendering:pixelated;background-repeat:no-repeat}
 .it b{display:block;font-size:17px;margin:8px 0 2px}
@@ -30,6 +30,7 @@ var ROWS=[
    [pie('pies',3),'Nearly full','Two or more free parking spaces are left.'],
    [pie('pies',4),'Almost full','A hollow square: one free parking space.'],
    [pie('pies',5),'Completely full','A solid square: no free parking space.'],
+   [pie('closed-pies',0),'Out of service','A ring with an X through it: the dock is closed or has been removed.'],
    [pie('ebikes',0),'One e-bike','Each orbiting dot is one available e-bike.'],
    [pie('ebikes',1),'Three e-bikes',''],
    [pie('ebikes',2),'Eight e-bikes','Eight dots is the most shown.']
@@ -42,6 +43,7 @@ var ROWS=[
    [bar(0,2),'Half full or more','Two or more free parking spaces are left.'],
    [bar(1,1),'Almost full','Solid with one open cell at the end: one free parking space.'],
    [bar(1,2),'Completely full','Solid and touching the cluster’s line: no free parking space.'],
+   [['closed-bars',75,2,19,7],'Out of service','An X in place of the bar: the dock is closed or has been removed.'],
    [bar(2,0),'E-bikes available','A dot to the right of the bar.'],
    [['bars',74,2,20,19,5],'A cluster','Three nearby docks: no bikes, a few bikes, half full or more.']
   ]}
