@@ -167,7 +167,7 @@ function bikeSection(saved) {
 // usage: lines describing how much data has been downloaded, from index.js.
 function buildConfig(saved, usage) {
   saved = saved || {};
-  usage = usage && usage.length ? usage : ['Nothing downloaded yet.'];
+  usage = usage || [];
   return [
     { type: 'heading', defaultValue: 'MBTA Pebble' },
     {
@@ -210,9 +210,7 @@ function buildConfig(saved, usage) {
         { type: 'heading', defaultValue: 'Data usage' },
         {
           type: 'text',
-          defaultValue: usage.join('<br>') +
-                        '<br><br>Counted by the watchface on this phone. Your phone\'s ' +
-                        'own cellular data screen shows the total for the Pebble app.'
+          defaultValue: usage.join('<br>')
         }
       ]
     },

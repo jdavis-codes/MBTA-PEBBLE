@@ -176,20 +176,26 @@ function megabytes(bytes) {
   return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
 }
 
-// One line per day and kind, for the logs and the settings page.
-function usageLines() {
+// The settings page gets two lines: today's Bluebikes and MBTA totals. With
+// detail, for the logs, yesterday is added, along with how many requests were
+// compressed and what the phone exposed about the last reply.
+function usageLines(detail) {
   var usage = loadUsage();
   var lines = [];
-  [[usageDay(0), 'Today'], [usageDay(1), 'Yesterday']].forEach(function(d) {
-    var day = usage[d[0]];
-    if (!day) return;
+  var days = [[usageDay(0), 'Today']];
+  if (detail) days.push([usageDay(1), 'Yesterday']);
+  days.forEach(function(d) {
+    var day = usage[d[0]] || {};
     [['bikes', 'Bluebikes'], ['trains', 'MBTA']].forEach(function(k) {
       var u = day[k[0]];
-      if (!u) return;
+      if (!u) {
+        if (!detail) lines.push(d[1] + ', ' + k[1] + ': nothing downloaded yet');
+        return;
+      }
       lines.push(d[1] + ', ' + k[1] + ': ' + (u.est ? 'about ' : '') + megabytes(u.wire) +
-                 ' downloaded in ' + u.n + (u.n === 1 ? ' request' : ' requests') +
-                 (u.gz ? ' (' + u.gz + ' compressed, ' + megabytes(u.data) + ' uncompressed)' : ''));
-      if (day[k[0] + 'Seen']) lines.push('Last ' + k[1] + ' reply: ' + day[k[0] + 'Seen']);
+                 ' in ' + u.n + (u.n === 1 ? ' request' : ' requests') +
+                 (detail && u.gz ? ' (' + u.gz + ' compressed, ' + megabytes(u.data) + ' uncompressed)' : ''));
+      if (detail && day[k[0] + 'Seen']) lines.push('Last ' + k[1] + ' reply: ' + day[k[0] + 'Seen']);
     });
   });
   return lines;
@@ -911,7 +917,7 @@ function recordDiag(text) {
 
 function logDiagHistory() {
   var history = diagHistory();
-  usageLines().forEach(function(line) { console.log('USAGE ' + line); });
+  usageLines(true).forEach(function(line) { console.log('USAGE ' + line); });
   console.log('DIAG HISTORY ' + history.length + ' entries');
   history.forEach(function(entry) {
     console.log('DIAG ' + entry.t + ' ' + entry.d);
