@@ -7,8 +7,10 @@
        #board -> guide-board.png   (screen: screen-guide-board.png)
        #dial  -> guide-dial.png    (screen: screen-guide-dial.png)
      Add -m for one guide as a narrow page, e.g. #board-m -> guide-board-mobile.png
-     (rendered 800px wide). #m, or opening the page on a phone, shows all three
-     narrow guides on one scrolling page.
+     (rendered 800px wide). #pies and #bars are the Bluebikes indicators
+     (-> guide-bikes-pies-mobile.png, guide-bikes-bars-mobile.png; screens:
+     screen-bikes-*.png). #m, or opening the page on a phone, shows every
+     narrow guide on one scrolling page.
      Each screen is a 144x168 capture of the watch showing demo data. -->
 <style>
 body{margin:0;background:#fff;font-family:"DejaVu Sans","Liberation Sans",sans-serif;color:#111}
@@ -29,6 +31,12 @@ svg{position:absolute;left:0;top:0}
 .m .e b{display:block;font-size:1.12em;margin-bottom:.08em}
 .m .n{flex:none;box-sizing:border-box;min-width:1.55em;padding:0 .3em;height:1.55em;border-radius:1em;background:#e3121b;color:#fff;font-weight:bold;font-size:.92em;line-height:1.55em;text-align:center;margin-top:.06em}
 .m .k{display:inline-block;background:#e3121b;color:#fff;font-weight:bold;font-size:.8em;line-height:1.5;padding:0 .5em;border-radius:1em;vertical-align:.08em}
+.m .note{margin:.1em 5% 0}
+.m .bk .e{align-items:center;margin:0 5% .6em}
+.m .bk .e:first-of-type{margin-top:.9em}
+.m .tile{flex:none;display:flex;align-items:center;justify-content:center;width:6.2em;height:4.3em;background:#000;border-radius:.4em}
+.m .tile svg{width:auto;height:auto;display:block}
+.m section:last-child{padding-bottom:1.2em}
 .m ul{margin:.1em 0 0;padding-left:1.15em}.m li{margin:.08em 0}
 </style>
 <div id="c"><img id="w" src="watch-screen.png"><svg id="s"></svg></div>
@@ -38,6 +46,44 @@ function px(x){return X0+x*K} function py(y){return Y0+y*K}
 // Targets are in watch pixels: box [x1,y1,x2,y2] or circ [cx,cy,r].
 // top: the arrow runs across the top margin and drops onto the target.
 // at: [x,y] watch pixel the arrow should end at instead of the nearest edge.
+// The Bluebikes indicators, for the narrow page. Each item is a crop of a
+// 144x168 capture, [capture, x, y, width, height], with a name and what it means.
+function pie(img,slot){return [img,6+13*slot-7,0,14,13]}
+function bar(cluster,i){return ['bars',75+20*cluster,2+6*i,19,7]}
+var BIKES={
+pies:{name:'Bluebikes indicators: line by line',note:'One shape for each dock, along the top left.',items:[
+ [pie('pies',0),'No bikes','An empty ring.'],
+ [pie('pies',1),'A few bikes','The slice is the share of dock slots holding a bike.'],
+ [pie('pies',2),'Half full',''],
+ [pie('pies',3),'Nearly full','Two or more free parking spaces.'],
+ [pie('pies',4),'Almost full','Hollow square: one free parking space.'],
+ [pie('pies',5),'Completely full','Solid square: no free parking space.'],
+ [pie('ebikes',1),'E-bikes','One orbiting dot for each e-bike, up to eight.'],
+ [pie('closed-pies',0),'Out of service','Crossed out: the dock is closed or removed.']
+]},
+bars:{name:'Bluebikes indicators: departure board and hour dial',note:'One bar for each dock, stacked in clusters of nearby docks.',items:[
+ [bar(0,0),'No bikes','An empty outline.'],
+ [bar(0,1),'A few bikes','A bar fills from the left with bikes.'],
+ [bar(0,2),'Half full or more','Two or more free parking spaces.'],
+ [bar(1,1),'Almost full','One open cell at the end: one free parking space.'],
+ [bar(1,2),'Completely full','Solid and touching the line: no free parking space.'],
+ [bar(2,0),'E-bikes','A dot to the right of the bar.'],
+ [['closed-bars',75,2,19,7],'Out of service','An X: the dock is closed or removed.'],
+ [['bars',74,2,20,19],'A cluster','Three nearby docks, joined by a line.']
+]}
+};
+function bikes(key){
+  var g=BIKES[key],h='<section class="g bk" id="'+key+'"><h2>'+g.name+'</h2><p class="note">'+g.note+'</p>';
+  g.items.forEach(function(it){
+    var k=it[0];
+    // The crop is its own small SVG so the pixels stay sharp at any size.
+    h+='<div class="e"><span class="tile"><svg viewBox="'+k[1]+' '+k[2]+' '+k[3]+' '+k[4]+'" style="width:'+(k[3]*(k[4]>14?0.19:0.26)).toFixed(2)+'em">'+
+       '<image href="screen-bikes-'+k[0]+'.png" width="144" height="168" style="image-rendering:pixelated"/></svg></span>'+
+       '<div><b>'+it[1]+'</b>'+it[2]+'</div></div>';
+  });
+  return h+'</section>';
+}
+
 // Lines of a body that start with "- " are drawn as a bulleted list.
 var BIKE_DATA='- Solid circle: dock data is up to date.<br>- Pulsing: downloading (every minute).<br>- X: the last download failed.<br>- Hidden when no docks are set.';
 var TRAIN_DATA='- Solid circle: timetables are up to date.<br>- Pulsing: downloading (every 2 minutes).<br>- X: the last download failed.';
@@ -128,16 +174,21 @@ mobile:[
 // The hash picks what is shown:
 //   #board     the wide guide, callouts on both sides (also #line, #dial)
 //   #board-m   that guide as a narrow page: numbered markers, shorter list
-//   #m         all three narrow guides on one scrolling page; this is also
-//              what a phone gets when the page is opened without a hash.
+//   #m         every narrow guide on one scrolling page, each layout followed
+//              by its Bluebikes indicators; this is also what a phone gets
+//              when the page is opened without a hash.
+//   #pies, #bars   one set of Bluebikes indicators as a narrow page
 var hash=location.hash.slice(1),parts=hash.split('-');
 var ALL=hash==='m'||(!hash&&Math.min(window.innerWidth,screen.width)<900);
 var guide=GUIDES[parts[0]]||GUIDES.line,items=guide.items;
+if(BIKES[parts[0]])parts[1]='m';
 var c=document.getElementById('c'),w=document.getElementById('w'),R='#e3121b';
 var W=2000,TW=470,TL=20,TR=1510;
 if(ALL||parts[1]==='m'){
   w.remove();document.getElementById('s').remove();c.className='m';
-  c.innerHTML=(ALL?['line','board','dial']:[parts[0]]).map(narrow).join('');
+  // The Bluebikes indicators follow the layouts that use them.
+  var show=function(key){return BIKES[key]?bikes(key):narrow(key)};
+  c.innerHTML=(ALL?['line','pies','board','dial','bars']:[parts[0]]).map(show).join('');
 }else{
   c.style.width=W+'px';w.src=guide.img;Y0=guide.y0;
   w.style.left=X0+'px';w.style.top=Y0+'px';w.style.width=144*K+'px';w.style.height=168*K+'px';

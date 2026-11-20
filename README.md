@@ -93,6 +93,20 @@ per-station query, so each refresh downloads the whole system's status (about
 
 ![Every Bluebikes dock indicator, enlarged](docs/guide-bikes.png)
 
+<details>
+<summary>Reading on a phone? Open the narrow version: line by line.</summary>
+
+![Bluebikes indicators for the line by line layout, narrow version](docs/guide-bikes-pies-mobile.png)
+
+</details>
+
+<details>
+<summary>Narrow version: departure board and hour dial.</summary>
+
+![Bluebikes indicators for the departure board and hour dial, narrow version](docs/guide-bikes-bars-mobile.png)
+
+</details>
+
 A dock that is out of service, or that Bluebikes has removed, is crossed out:
 a ring with an X through it in the line by line layout, and an X in place of
 its bar in the other layouts.
