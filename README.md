@@ -16,8 +16,7 @@ Pebble app.
 <details>
 <summary>Reading on a phone? Open the narrow version of this guide.</summary>
 
-![Line by line guide, part 1](docs/watch-guide-mobile-1.png)
-![Line by line guide, part 2](docs/watch-guide-mobile-2.png)
+![Line by line guide, narrow version](docs/watch-guide-mobile.png)
 
 </details>
 
@@ -60,10 +59,9 @@ The watchface settings offer three layouts.
 ![Annotated guide to the departure board layout](docs/guide-board.png)
 
 <details>
-<summary>Narrow version for phones.</summary>
+<summary>Reading on a phone? Open the narrow version of this guide.</summary>
 
-![Departure board guide, part 1](docs/guide-board-mobile-1.png)
-![Departure board guide, part 2](docs/guide-board-mobile-2.png)
+![Departure board guide, narrow version](docs/guide-board-mobile.png)
 
 </details>
 
@@ -72,10 +70,9 @@ The watchface settings offer three layouts.
 ![Annotated guide to the hour dial layout](docs/guide-dial.png)
 
 <details>
-<summary>Narrow version for phones.</summary>
+<summary>Reading on a phone? Open the narrow version of this guide.</summary>
 
-![Hour dial guide, part 1](docs/guide-dial-mobile-1.png)
-![Hour dial guide, part 2](docs/guide-dial-mobile-2.png)
+![Hour dial guide, narrow version](docs/guide-dial-mobile.png)
 
 </details>
 
