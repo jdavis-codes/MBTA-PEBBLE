@@ -46,6 +46,8 @@ var BIKE_STATUS_URLS = [
 // Roughly what gzip leaves of the dock feed, for downloads whose size on the
 // wire the phone does not report.
 var BIKE_GZIP_RATIO = 0.076;
+// The same for MBTA replies, which are smaller and compress less well.
+var TRAIN_GZIP_RATIO = 0.2;
 // Must match NUM_BIKES and BIKE_LEVELS in src/c/watchface.c.
 var NUM_BIKES = 9;
 var BIKE_LEVELS = 8;
@@ -124,8 +126,14 @@ function header(xhr, name) {
 
 function noteUsage(kind, xhr) {
   var size = xhr.responseText ? xhr.responseText.length : 0;
-  var gzip = /gzip|br|deflate/i.test(header(xhr, 'Content-Encoding'));
   var length = parseInt(header(xhr, 'Content-Length'), 10);
+  var etag = header(xhr, 'ETag');
+  // A phone that unpacks a compressed reply drops its Content-Encoding and
+  // Content-Length headers before the code sees them. Two things still give
+  // it away: the dock feed marks its compressed copy with a weak ETag ("W/"),
+  // and both servers always send a length with an uncompressed reply.
+  var gzip = /gzip|br|deflate/i.test(header(xhr, 'Content-Encoding')) || /^W\//.test(etag) ||
+             (!(length > 0) && header(xhr, 'Content-Type') !== '');
   var usage = loadUsage();
   var today = usageDay(0);
   var day = usage[today] || (usage[today] = {});
@@ -140,6 +148,8 @@ function noteUsage(kind, xhr) {
   day[kind + 'Seen'] = 'type=' + (header(xhr, 'Content-Type') || 'none') +
                        ', encoding=' + (header(xhr, 'Content-Encoding') || 'none') +
                        ', length=' + (header(xhr, 'Content-Length') || 'none') +
+                       ', etag=' + (etag ? etag.substring(0, 6) : 'none') +
+                       ', counted as ' + (gzip ? 'compressed' : 'not compressed') +
                        ', ' + all.length + ' characters of headers, ' + size + ' of data';
   var u = day[kind] || (day[kind] = { n: 0, data: 0, wire: 0, gz: 0, est: 0 });
   u.n++;
@@ -150,7 +160,7 @@ function noteUsage(kind, xhr) {
     u.wire += length;
   } else if (gzip) {
     // Compressed, but the phone does not say by how much: estimate it.
-    u.wire += Math.round(size * BIKE_GZIP_RATIO);
+    u.wire += Math.round(size * (kind === 'bikes' ? BIKE_GZIP_RATIO : TRAIN_GZIP_RATIO));
     u.est++;
   } else {
     u.wire += size;
