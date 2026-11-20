@@ -184,8 +184,23 @@ function buildConfig(saved, usage, location) {
           options: [
             { label: 'Line by line', value: '0' },
             { label: 'Departure board', value: '1' },
-            { label: 'Hour dial', value: '2' }
+            { label: 'Hour dial', value: '2' },
+            { label: 'Departure board: nearby', value: '3' }
           ]
+        },
+        {
+          type: 'slider',
+          messageKey: 'RADIUS',
+          label: 'Nearby radius (meters)',
+          description: 'Departure board: nearby only. It lists every train and bus ' +
+                       'leaving from stops within this distance of your phone, in ' +
+                       'place of your saved stations. The watch shows the radius ' +
+                       'above the list. Your phone\'s position is sent to the MBTA ' +
+                       'to find the stops.',
+          defaultValue: 400,
+          min: 100,
+          max: 1000,
+          step: 100
         },
         {
           type: 'slider',

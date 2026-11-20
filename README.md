@@ -26,7 +26,7 @@ Commuter rail times are scheduled times, replaced by live predictions when the M
 
 ### Layouts
 
-The watchface settings offer three layouts.
+The watchface settings offer four layouts.
 
 - **Line by line**: The layout in the guide above. It shows one row per station, focusing on verbose schedule info.
 - **Departure board**: This layout shows every upcoming train from all three stations in one list, soonest first, with its destination and the minutes until it leaves.
@@ -55,6 +55,17 @@ The watchface settings offer three layouts.
 </details>
 
 Both screens use demo data so that every marker appears at once.
+
+- **Departure board: nearby**: the departure board, but listing every train
+  and bus leaving from stops within a set distance of your phone, in place of
+  your saved stations. Each line starts with the line or route (`RL` Red Line,
+  `OL` Orange Line, `BL` Blue Line, a Green Line branch letter, or a bus
+  number). The column bar shows the radius, for example `400m`, where the
+  ordinary board says `TO`, or `NO FIX` when the phone can't give a position.
+  The radius is set in the watchface settings, from 100 to 1000 meters. Your
+  phone's position is sent to the MBTA to find the stops; the phone is asked
+  for it at most every five minutes, and only while this layout is chosen.
+  Departure warnings and service alerts don't apply to this layout.
 
 Service alerts only scroll in the line by line layout. The departure board marks a
 train with `!` when its row has an alert; the hour dial does not show alerts.

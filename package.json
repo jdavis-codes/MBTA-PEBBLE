@@ -1,7 +1,7 @@
 {
   "name": "watchface",
   "author": "MakeAwesomeHappen",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "keywords": [
     "pebble-app"
   ],
@@ -47,7 +47,9 @@
       "BIKES",
       "BIKE_FAILED",
       "LAYOUT",
-      "TO[3]"
+      "TO[3]",
+      "NEAR",
+      "RADIUS"
     ],
     "resources": {
       "media": []

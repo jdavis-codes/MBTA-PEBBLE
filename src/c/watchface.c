@@ -111,7 +111,11 @@ typedef struct {
 #define LABEL_SIZE 24
 
 // The screen arrangements; must match the Layout options in src/pkjs/config.js.
-enum { LAYOUT_CLASSIC, LAYOUT_BOARD, LAYOUT_DIAL, NUM_LAYOUTS };
+// LAYOUT_NEARBY is the departure board fed by the stops around the phone
+// instead of the saved stations; the phone decides what goes on it.
+enum { LAYOUT_CLASSIC, LAYOUT_BOARD, LAYOUT_DIAL, LAYOUT_NEARBY, NUM_LAYOUTS };
+// Includes the terminator; what the nearby board shows in its column bar.
+#define NEAR_SIZE 12
 // Includes the terminator; must match TO_MAX_CHARS + 1 in src/pkjs/index.js.
 #define TO_SIZE 12
 
@@ -250,6 +254,8 @@ static time_t s_last_request;
 static char s_bikes[2 * NUM_BIKES + 1] = "-0-0-0-0-0-0-0-0-0";
 // Where each train is going, for the departure board.
 static char s_to[NUM_SECTIONS][NUM_TIMES][TO_SIZE];
+// The nearby board's radius ("400m"), or why it has nothing to show.
+static char s_near[NEAR_SIZE];
 static Diag s_diag;
 // The previous run's breadcrumb as text, until the phone has received it.
 static char s_prev_diag[120];
@@ -903,7 +909,7 @@ static void prv_update_layout(int width) {
     }
   }
   s_row_font = prv_pick_row_font(s_cells, s_counts, width);
-  if (s_settings.layout == LAYOUT_BOARD) {
+  if (s_settings.layout == LAYOUT_BOARD || s_settings.layout == LAYOUT_NEARBY) {
     prv_build_board(now);
   } else if (s_settings.layout == LAYOUT_DIAL) {
     prv_build_dial(now);
@@ -1217,7 +1223,9 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
   prv_draw_text(ctx, "TIME", s_header_font, bar, GTextAlignmentLeft);
   prv_draw_text(ctx, "MIN", s_header_font, bar, GTextAlignmentRight);
   bar.origin.x = BOARD_TO_X;
-  prv_draw_text(ctx, "TO", s_header_font, bar, GTextAlignmentLeft);
+  // The nearby board says how far it is looking in place of "TO".
+  bool nearby = s_settings.layout == LAYOUT_NEARBY;
+  prv_draw_text(ctx, nearby && s_near[0] ? s_near : "TO", s_header_font, bar, GTextAlignmentLeft);
 
   int rows_top = BOARD_TOP + BOARD_BAR_H;
   if (s_board_count == 0) {
@@ -1235,7 +1243,9 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
     const BoardRow *row = &s_board[i];
     int y = rows_top + i * BOARD_ROW_H;
     bool cancelled = row->flag == FLAG_CANCELLED;
-    bool inverted = !cancelled && prv_is_highlighted(row->section, row->departure, now_ms);
+    // The saved stations' departure warnings do not apply to nearby departures.
+    bool inverted = !cancelled && !nearby &&
+                    prv_is_highlighted(row->section, row->departure, now_ms);
     GColor fg = inverted ? GColorBlack : GColorWhite;
     GColor bg = inverted ? GColorWhite : GColorBlack;
     GRect line = GRect(0, y, width, BOARD_ROW_H - 1);
@@ -1424,7 +1434,7 @@ static void prv_canvas_draw(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
-  if (s_settings.layout == LAYOUT_BOARD) {
+  if (s_settings.layout == LAYOUT_BOARD || s_settings.layout == LAYOUT_NEARBY) {
     prv_draw_board(ctx, bounds, now_ms);
   } else if (s_settings.layout == LAYOUT_DIAL) {
     prv_draw_dial(ctx, now_ms);
@@ -1776,6 +1786,13 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   }
   if (to_changed) {
     persist_write_data(PERSIST_KEY_TO, s_to, sizeof(s_to));
+  }
+
+  Tuple *near = dict_find(iter, MESSAGE_KEY_NEAR);
+  if (near && near->type == TUPLE_CSTRING && strncmp(s_near, near->value->cstring, NEAR_SIZE - 1) != 0) {
+    strncpy(s_near, near->value->cstring, NEAR_SIZE - 1);
+    s_near[NEAR_SIZE - 1] = '\0';
+    layer_mark_dirty(s_canvas);
   }
 
   Tuple *bikes = dict_find(iter, MESSAGE_KEY_BIKES);

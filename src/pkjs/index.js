@@ -349,8 +349,8 @@ function bostonOffsetHours(ms) {
 // Boston time. MBTA service days run past midnight (e.g. "25:10"), so before
 // 3am that is yesterday's date with hours >= 24, plus today's service day so
 // the first morning trains show once the last night train has gone.
-function serviceWindows(nowMs) {
-  var startMs = nowMs - LOOKBACK_MS;
+function serviceWindows(nowMs, lookbackMs) {
+  var startMs = nowMs - (lookbackMs === undefined ? LOOKBACK_MS : lookbackMs);
   // Shifted so the UTC getters read Boston wall-clock time.
   var start = new Date(startMs + bostonOffsetHours(startMs) * 3600000);
   function ymd(d) {
@@ -776,6 +776,172 @@ function shortDest(headsign) {
   return s.replace(/\|/g, ' ').slice(0, TO_MAX_CHARS).replace(/\s+$/, '');
 }
 
+// ---- Departure board: nearby ----
+// Must match LAYOUT_NEARBY in src/c/watchface.c and the Layout options in config.js.
+var LAYOUT_NEARBY = 3;
+var NEARBY_DEFAULT_RADIUS_M = 400;
+// A position this recent is reused, so the phone is asked at most this often.
+var NEARBY_POSITION_MS = 5 * 60 * 1000;
+// The list of nearby stops is kept until the phone has moved this far.
+var NEARBY_MOVE_M = 150;
+var METERS_PER_DEGREE = 111000;
+var s_position = null;   // { t, lat, lon }
+var s_nearStops = null;  // { lat, lon, radius, stops: { id: meters away } }
+
+function isNearby(saved) {
+  return parseInt(saved.LAYOUT, 10) === LAYOUT_NEARBY;
+}
+
+function nearbyRadius(saved) {
+  var r = parseInt(saved.RADIUS, 10);
+  return r > 0 ? r : NEARBY_DEFAULT_RADIUS_M;
+}
+
+function metersBetween(lat1, lon1, lat2, lon2) {
+  var rad = Math.PI / 180;
+  var dy = (lat2 - lat1) * METERS_PER_DEGREE;
+  var dx = (lon2 - lon1) * METERS_PER_DEGREE * Math.cos(lat1 * rad);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function nearbyPosition(callback) {
+  if (s_position && Date.now() - s_position.t < NEARBY_POSITION_MS) return callback(null, s_position);
+  var geo = typeof navigator !== 'undefined' && navigator.geolocation;
+  if (!geo) return callback(new Error('No location service'));
+  geo.getCurrentPosition(function(pos) {
+    s_position = { t: Date.now(), lat: pos.coords.latitude, lon: pos.coords.longitude };
+    callback(null, s_position);
+  }, function(err) {
+    callback(new Error('Location ' + (err && err.code === 1 ? 'denied' : 'unavailable')));
+  }, LOCATION_OPTIONS);
+}
+
+// Calls back with the stops within radius metres, as { stop id: metres away }.
+function nearbyStops(pos, radius, callback) {
+  var c = s_nearStops;
+  if (c && c.radius === radius && metersBetween(c.lat, c.lon, pos.lat, pos.lon) < NEARBY_MOVE_M) {
+    return callback(null, c.stops);
+  }
+  apiGet('/stops', {
+    'filter[latitude]': pos.lat.toFixed(5),
+    'filter[longitude]': pos.lon.toFixed(5),
+    // The API measures in degrees and its circle is not exact, so ask a
+    // little wide and measure properly below.
+    'filter[radius]': (radius * 1.5 / METERS_PER_DEGREE).toFixed(5),
+    'filter[route_type]': '0,1,2,3',
+    'sort': 'distance',
+    'page[limit]': 60,
+    'fields[stop]': 'latitude,longitude'
+  }, function(err, json) {
+    if (err) return callback(err);
+    var stops = {};
+    json.data.forEach(function(stop) {
+      var a = stop.attributes;
+      var m = metersBetween(pos.lat, pos.lon, a.latitude, a.longitude);
+      if (m <= radius) stops[stop.id] = m;
+    });
+    s_nearStops = { lat: pos.lat, lon: pos.lon, radius: radius, stops: stops };
+    callback(null, stops);
+  });
+}
+
+// What a departure is called on the nearby board: which line or bus it is,
+// then where it is going, within the watch's destination column.
+function nearbyName(routeId, route, headsign) {
+  var prefix = '';
+  if (route && route.type === 3) prefix = route.short_name || routeId;
+  else if (routeId === 'Red') prefix = 'RL';
+  else if (routeId === 'Orange') prefix = 'OL';
+  else if (routeId === 'Blue') prefix = 'BL';
+  else if (routeId === 'Mattapan') prefix = 'M';
+  else if (routeId.indexOf('Green-') === 0) prefix = routeId.substring(6);
+  var name = shortDest(headsign);
+  return (prefix ? prefix + ' ' + name : name).slice(0, TO_MAX_CHARS).replace(/\s+$/, '');
+}
+
+// Calls back with the next departures from every stop within radius metres,
+// spread over the watch's three rows (the board merges them back by time),
+// and the text for the board's column bar.
+function fetchNearby(radius, callback) {
+  var label = radius + 'm';
+  var empty = [];
+  for (var r = 0; r < NUM_ROWS; r++) empty.push({ mode: MODE_MINUTES, trains: [] });
+  nearbyPosition(function(err, pos) {
+    if (err) return callback(err, null, 'NO FIX');
+    nearbyStops(pos, radius, function(err2, stops) {
+      if (err2) return callback(err2, null, label);
+      var ids = Object.keys(stops);
+      if (ids.length === 0) return callback(null, empty, label);
+      var nowMs = Date.now();
+      var nowSec = Math.floor(nowMs / 1000);
+      var windows = serviceWindows(nowMs, 0);
+      var best = {};
+      var pendingWindows = windows.length;
+      var failure = null;
+      windows.forEach(function(win) {
+        apiGet('/schedules', {
+          'filter[stop]': ids.join(','),
+          'filter[date]': win.date,
+          'filter[min_time]': win.minTime,
+          'include': 'prediction,trip,route',
+          'sort': 'departure_time',
+          'page[limit]': 80,
+          'fields[schedule]': 'departure_time',
+          'fields[prediction]': 'departure_time,schedule_relationship',
+          'fields[trip]': 'headsign',
+          'fields[route]': 'short_name,type'
+        }, function(err3, json) {
+          if (err3) {
+            failure = err3;
+          } else {
+            var included = indexIncluded(json);
+            json.data.forEach(function(sched) {
+              var rel = sched.relationships || {};
+              var routeId = rel.route && rel.route.data ? rel.route.data.id : '';
+              var route = included['route:' + routeId];
+              var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
+              var pred = rel.prediction && rel.prediction.data
+                ? included['prediction:' + rel.prediction.data.id] : null;
+              var p = pred ? pred.attributes : null;
+              // No departure time means the train or bus ends its run here.
+              if (!sched.attributes.departure_time) return;
+              var scheduled = parseIso(sched.attributes.departure_time);
+              var predicted = p ? parseIso(p.departure_time) : 0;
+              var cancelled = isCancelled(p);
+              var rail = isCommuterRail(routeId);
+              // As on the saved stations: only commuter rail keeps a canceled
+              // train on the board or marks a late one.
+              if (cancelled && !rail) return;
+              var t = cancelled ? scheduled : (predicted || scheduled);
+              if (t <= nowSec) return;
+              var flag = !rail ? FLAG_NONE : cancelled ? FLAG_CANCELLED
+                       : predicted && predicted - scheduled >= DELAY_SEC ? FLAG_DELAYED : FLAG_NONE;
+              var stopId = rel.stop && rel.stop.data ? rel.stop.data.id : '';
+              var away = stops[stopId] === undefined ? radius : stops[stopId];
+              var tripId = trip ? rel.trip.data.id : stopId + '@' + t;
+              // A trip that calls at several nearby stops is listed once, at the closest.
+              if (best[tripId] && best[tripId].away <= away) return;
+              best[tripId] = { time: t, dest: NO_BRANCH, flag: flag, away: away,
+                               to: nearbyName(routeId, route ? route.attributes : null,
+                                              trip ? trip.attributes.headsign : '') };
+            });
+          }
+          if (--pendingWindows > 0) return;
+          var trains = Object.keys(best).map(function(k) { return best[k]; });
+          if (failure && trains.length === 0) return callback(failure, null, label);
+          trains.sort(function(x, y) { return x.time - y.time; });
+          var result = [];
+          for (var row = 0; row < NUM_ROWS; row++) {
+            result.push({ mode: MODE_MINUTES,
+                          trains: trains.slice(row * MAX_TIMES, (row + 1) * MAX_TIMES) });
+          }
+          callback(null, result, label);
+        });
+      });
+    });
+  });
+}
+
 function putRow(dict, row, result) {
   var dest = '';
   var flags = '';
@@ -854,10 +1020,12 @@ function refresh() {
   var saved = savedSettings();
   var dict = {};
   var rows = [];
-  var pending = NUM_ROWS;
+  var nearby = isNearby(saved);
+  // The nearby board is one lookup in place of the three saved stations.
+  var pending = nearby ? 1 : NUM_ROWS;
   for (var i = 0; i < NUM_ROWS; i++) {
     rows.push(rowConfig(i, saved));
-    if (rows[i].alerts && rows[i].set) pending++;
+    if (!nearby && rows[i].alerts && rows[i].set) pending++;
   }
   var bikeIds = bikeStations(saved);
   if (hasBikes(bikeIds)) pending++;
@@ -887,6 +1055,24 @@ function refresh() {
     });
   } else {
     dict[keys.BIKES] = new Array(NUM_BIKES + 1).join(BIKE_NONE + '0');
+  }
+
+  if (nearby) {
+    fetchNearby(nearbyRadius(saved), function(err, result, label) {
+      if (fetchId !== s_fetch_id) return;
+      dict[keys.NEAR] = label;
+      if (err) {
+        console.log('Nearby fetch failed: ' + err.message);
+        failed++;
+      } else {
+        for (var row = 0; row < NUM_ROWS; row++) {
+          dict[keys.ALERT + row] = '';
+          putRow(dict, row, result[row]);
+        }
+      }
+      done();
+    });
+    return;
   }
 
   for (var r = 0; r < NUM_ROWS; r++) {
@@ -959,6 +1145,8 @@ Pebble.addEventListener('webviewclosed', function(e) {
   for (var slot = 0; slot < NUM_BIKES; slot++) {
     delete settings[keys.BIKE + slot];
   }
+  // The radius is only used on the phone; the watch is told it with the departures.
+  delete settings[keys.RADIUS];
   sendToWatch(settings, 3, 'settings');
   if (Object.keys(cleared).length > 0) {
     sendToWatch(cleared, 3, 'cleared rows');
@@ -1023,7 +1211,8 @@ if (typeof module !== 'undefined') {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
     alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
     tagBusDestinations: tagBusDestinations, noteUsage: noteUsage, usageLines: usageLines,
-    testLocation: testLocation, locationLines: locationLines,
+    testLocation: testLocation, locationLines: locationLines, nearbyName: nearbyName,
+    metersBetween: metersBetween,
     shortDest: shortDest
   };
 }
