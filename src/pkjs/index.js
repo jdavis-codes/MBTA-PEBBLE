@@ -129,6 +129,18 @@ function noteUsage(kind, xhr) {
   var usage = loadUsage();
   var today = usageDay(0);
   var day = usage[today] || (usage[today] = {});
+  // What the phone lets the code see of the last reply, to tell "not
+  // compressed" apart from "the phone hides the reply's headers".
+  var all = '';
+  try {
+    all = xhr.getAllResponseHeaders() || '';
+  } catch (e) {
+    all = 'error: ' + e.message;
+  }
+  day[kind + 'Seen'] = 'type=' + (header(xhr, 'Content-Type') || 'none') +
+                       ', encoding=' + (header(xhr, 'Content-Encoding') || 'none') +
+                       ', length=' + (header(xhr, 'Content-Length') || 'none') +
+                       ', ' + all.length + ' characters of headers, ' + size + ' of data';
   var u = day[kind] || (day[kind] = { n: 0, data: 0, wire: 0, gz: 0, est: 0 });
   u.n++;
   u.data += size;
@@ -167,6 +179,7 @@ function usageLines() {
       lines.push(d[1] + ', ' + k[1] + ': ' + (u.est ? 'about ' : '') + megabytes(u.wire) +
                  ' downloaded in ' + u.n + (u.n === 1 ? ' request' : ' requests') +
                  (u.gz ? ' (' + u.gz + ' compressed, ' + megabytes(u.data) + ' uncompressed)' : ''));
+      if (day[k[0] + 'Seen']) lines.push('Last ' + k[1] + ' reply: ' + day[k[0] + 'Seen']);
     });
   });
   return lines;
