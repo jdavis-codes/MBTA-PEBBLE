@@ -1,0 +1,71 @@
+# Tests and builds every push. On main, a version in package.json that has no
+# tag yet is tagged with that version and released with the built .pbw attached.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Phone-side tests
+        run: make test
+      - uses: astral-sh/setup-uv@v5
+      - name: Install the Pebble SDK and build
+        run: scripts/setup-pebble.sh
+      - name: Collect the app
+        id: app
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          cp build/*.pbw "mbta-pebble-$version.pbw"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mbta-pebble-${{ steps.app.outputs.version }}
+          path: mbta-pebble-*.pbw
+          if-no-files-found: error
+
+  release:
+    # Only main is released, and only when its version is new.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "$version" >/dev/null 2>&1 || \
+             git ls-remote --exit-code --tags origin "refs/tags/$version" >/dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "$version is already tagged: nothing to release."
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.version.outputs.new == 'true'
+        with:
+          name: mbta-pebble-${{ steps.version.outputs.version }}
+      - name: Tag and release
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$VERSION" "mbta-pebble-$VERSION.pbw" \
+            --target "$GITHUB_SHA" --title "MBTA Pebble $VERSION" --generate-notes
