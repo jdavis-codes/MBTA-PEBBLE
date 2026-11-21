@@ -225,20 +225,22 @@ function saveLocationTest(t) {
   } catch (e) { /* only a diagnostic */ }
 }
 
-function testLocation() {
-  var t = loadLocationTest();
-  var geo = typeof navigator !== 'undefined' && navigator.geolocation;
-  t.asked++;
-  if (!geo) {
-    t.failed++;
-    t.error = 'the phone offers no location service to the watchface';
-    return saveLocationTest(t);
-  }
-  saveLocationTest(t);
-  var started = Date.now();
-  geo.getCurrentPosition(function(pos) {
-    var r = loadLocationTest();
-    var now = Date.now();
+// One request to the phone at a time. A request the phone never answers must
+// not hold up the timetables or pile up behind itself, so it is given up on
+// after LOCATION_HUNG_MS, by a timer and, because the iPhone app suspends
+// timers in the background, by the clock when the next request comes in.
+var LOCATION_HUNG_MS = 20 * 1000;
+var s_locating = 0;       // when the request in flight was made, or 0
+var s_locationId = 0;
+var s_locationWaiters = [];
+
+function finishLocation(id, err, pos) {
+  if (id !== s_locationId || !s_locating) return;
+  var started = s_locating;
+  s_locating = 0;
+  var r = loadLocationTest();
+  var now = Date.now();
+  if (pos) {
     r.ok++;
     // The longest wait between two answers shows up background stalls.
     if (r.lastOk && now - r.lastOk > r.gap) r.gap = now - r.lastOk;
@@ -248,14 +250,49 @@ function testLocation() {
     r.age = pos.timestamp ? Math.max(0, Math.round((now - pos.timestamp) / 1000)) : -1;
     // Rounded to about a kilometre: enough to see it is right, and it never leaves the phone.
     r.where = pos.coords.latitude.toFixed(2) + ', ' + pos.coords.longitude.toFixed(2);
-    saveLocationTest(r);
-  }, function(err) {
-    var r = loadLocationTest();
+  } else {
     r.failed++;
-    r.error = (err && err.code === 1 ? 'permission denied' : err && err.code === 3 ? 'timed out'
-               : 'position unavailable') + ' at ' + clockTime(Date.now());
-    saveLocationTest(r);
-  }, LOCATION_OPTIONS);
+    r.error = err + ' at ' + clockTime(now);
+  }
+  saveLocationTest(r);
+  var waiters = s_locationWaiters;
+  s_locationWaiters = [];
+  waiters.forEach(function(w) {
+    try { w(pos ? null : new Error(err), pos); } catch (e) { console.log('Location waiter: ' + e); }
+  });
+}
+
+// Asks the phone where it is; callback(err, pos) is optional.
+function askLocation(callback) {
+  if (callback) s_locationWaiters.push(callback);
+  if (s_locating) {
+    if (Date.now() - s_locating < LOCATION_HUNG_MS) return;
+    finishLocation(s_locationId, 'no answer from the phone');
+    // finishLocation called the waiters, this one included.
+    return;
+  }
+  var id = ++s_locationId;
+  s_locating = Date.now();
+  var t = loadLocationTest();
+  t.asked++;
+  saveLocationTest(t);
+  try {
+    var geo = typeof navigator !== 'undefined' && navigator.geolocation;
+    if (!geo) return finishLocation(id, 'the phone offers no location service to the watchface');
+    geo.getCurrentPosition(function(pos) {
+      finishLocation(id, null, pos);
+    }, function(err) {
+      finishLocation(id, err && err.code === 1 ? 'permission denied'
+                         : err && err.code === 3 ? 'timed out' : 'position unavailable');
+    }, LOCATION_OPTIONS);
+    setTimeout(function() { finishLocation(id, 'no answer from the phone'); }, LOCATION_HUNG_MS);
+  } catch (e) {
+    finishLocation(id, 'the location request could not be made');
+  }
+}
+
+function testLocation() {
+  askLocation(null);
 }
 
 function clockTime(ms) {
@@ -266,8 +303,9 @@ function clockTime(ms) {
 function locationLines() {
   var t = loadLocationTest();
   if (!t.asked) return ['Not asked yet today.'];
+  var lost = Math.max(0, t.asked - t.ok - t.failed - (s_locating ? 1 : 0));
   var lines = ['Asked ' + t.asked + (t.asked === 1 ? ' time' : ' times') + ' today: ' + t.ok +
-               ' answered, ' + t.failed + ' failed.'];
+               ' answered, ' + t.failed + ' failed' + (lost ? ', ' + lost + ' lost' : '') + '.'];
   if (t.lastOk) {
     lines.push('Last answer at ' + clockTime(t.lastOk) + ': within ' + t.accuracy + ' m, ' +
                (t.age < 0 ? 'age unknown' : t.age + ' s old') + ', took ' +
@@ -495,7 +533,7 @@ function fetchCommuterRail(row, callback) {
                    : predicted && predicted - scheduled >= DELAY_SEC ? FLAG_DELAYED : FLAG_NONE;
           if (t > nowSec) {
             trains.push({ time: t, dest: ' ', flag: flag,
-                          to: shortDest(trip && trip.attributes.headsign) });
+                          to: badgedName(row.route, '', trip && trip.attributes.headsign) });
           }
         });
       }
@@ -615,7 +653,8 @@ function fetchPredictions(row, showBranches, callback) {
       if (showBranches) {
         dest = branchLetter(rel.route && rel.route.data ? rel.route.data.id : '', headsign);
       }
-      trains.push({ time: t, dest: dest, to: shortDest(headsign), headsign: headsign });
+      var routeId = rel.route && rel.route.data ? rel.route.data.id : row.route;
+      trains.push({ time: t, dest: dest, to: badgedName(routeId, '', headsign), headsign: headsign });
     });
     trains.sort(function(x, y) { return x.time - y.time; });
     trains = trains.slice(0, MAX_TIMES);
@@ -762,7 +801,7 @@ function refreshBikes() {
 }
 
 // Must match TO_SIZE - 1 in src/c/watchface.c.
-var TO_MAX_CHARS = 11;
+var TO_MAX_CHARS = 14;
 var DEST_SHORT = [
   ['North Station', 'N Station'], ['South Station', 'S Station'], ['Government', 'Govt'],
   [' Street', ' St'], [' Square', ' Sq'], [' Center', ' Ctr'], [' Junction', ' Jct'],
@@ -774,6 +813,35 @@ function shortDest(headsign) {
   var s = String(headsign || '').split('/')[0].split(' via ')[0];
   DEST_SHORT.forEach(function(pair) { s = s.replace(pair[0], pair[1]); });
   return s.replace(/\|/g, ' ').slice(0, TO_MAX_CHARS).replace(/\s+$/, '');
+}
+
+// The departure boards start each destination with a badge for its line. The
+// watch draws it from the first character: must match the BADGE_ characters
+// in src/c/watchface.c.
+var BADGE_SUBWAY = '^';   // then one letter: R, O or B
+var BADGE_GREEN = '~';    // then the branch letter (M for the Mattapan Line)
+var BADGE_BUS = '#';      // then the route number and a space
+var BADGE_RAIL = '=';     // commuter rail
+// Bus routes whose number on the street differs from their id.
+var BUS_NAMES = { '741': 'SL1', '742': 'SL2', '743': 'SL3', '751': 'SL4', '749': 'SL5',
+                  '746': 'SLW', '747': 'CT2', '708': 'CT3' };
+
+function lineBadge(routeId, shortName) {
+  routeId = String(routeId || '');
+  if (routeId === 'Red') return BADGE_SUBWAY + 'R';
+  if (routeId === 'Orange') return BADGE_SUBWAY + 'O';
+  if (routeId === 'Blue') return BADGE_SUBWAY + 'B';
+  if (routeId === 'Mattapan') return BADGE_GREEN + 'M';
+  if (routeId.indexOf('Green-') === 0) return BADGE_GREEN + routeId.charAt(6);
+  if (isCommuterRail(routeId)) return BADGE_RAIL;
+  if (!routeId) return '';
+  return BADGE_BUS + String(shortName || BUS_NAMES[routeId] || routeId).slice(0, 3) + ' ';
+}
+
+// A departure's line badge and destination, within the watch's destination column.
+function badgedName(routeId, shortName, headsign) {
+  return (lineBadge(routeId, shortName) + shortDest(headsign)).slice(0, TO_MAX_CHARS)
+    .replace(/\s+$/, '');
 }
 
 // ---- Departure board: nearby ----
@@ -804,16 +872,22 @@ function metersBetween(lat1, lon1, lat2, lon2) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+// The last known position is used straight away, however old, and a newer
+// one is asked for on the side: the departures never wait for the phone's
+// location service unless there is no position at all yet.
 function nearbyPosition(callback) {
-  if (s_position && Date.now() - s_position.t < NEARBY_POSITION_MS) return callback(null, s_position);
-  var geo = typeof navigator !== 'undefined' && navigator.geolocation;
-  if (!geo) return callback(new Error('No location service'));
-  geo.getCurrentPosition(function(pos) {
-    s_position = { t: Date.now(), lat: pos.coords.latitude, lon: pos.coords.longitude };
-    callback(null, s_position);
-  }, function(err) {
-    callback(new Error('Location ' + (err && err.code === 1 ? 'denied' : 'unavailable')));
-  }, LOCATION_OPTIONS);
+  function keep(err, pos) {
+    if (pos) s_position = { t: Date.now(), lat: pos.coords.latitude, lon: pos.coords.longitude };
+  }
+  if (s_position) {
+    if (Date.now() - s_position.t >= NEARBY_POSITION_MS) askLocation(keep);
+    return callback(null, s_position);
+  }
+  askLocation(function(err, pos) {
+    keep(err, pos);
+    if (s_position) callback(null, s_position);
+    else callback(new Error('Location: ' + (err ? err.message : 'none')));
+  });
 }
 
 // Calls back with the stops within radius metres, as { stop id: metres away }.
@@ -845,18 +919,8 @@ function nearbyStops(pos, radius, callback) {
   });
 }
 
-// What a departure is called on the nearby board: which line or bus it is,
-// then where it is going, within the watch's destination column.
 function nearbyName(routeId, route, headsign) {
-  var prefix = '';
-  if (route && route.type === 3) prefix = route.short_name || routeId;
-  else if (routeId === 'Red') prefix = 'RL';
-  else if (routeId === 'Orange') prefix = 'OL';
-  else if (routeId === 'Blue') prefix = 'BL';
-  else if (routeId === 'Mattapan') prefix = 'M';
-  else if (routeId.indexOf('Green-') === 0) prefix = routeId.substring(6);
-  var name = shortDest(headsign);
-  return (prefix ? prefix + ' ' + name : name).slice(0, TO_MAX_CHARS).replace(/\s+$/, '');
+  return badgedName(routeId, route ? route.short_name : '', headsign);
 }
 
 // Calls back with the next departures from every stop within radius metres,
@@ -1004,7 +1068,6 @@ function refresh() {
   // Every tenth refresh (about 20 minutes) the history is logged again, so a
   // log capture attached at any time sees it without the app restarting.
   if (++s_refreshes % 10 === 0) logDiagHistory();
-  testLocation();
   if (s_fetching) {
     if (Date.now() - s_fetch_started < FETCH_HUNG_MS) {
       s_refetch = true;
@@ -1018,6 +1081,8 @@ function refresh() {
   var fetchId = ++s_fetch_id;
 
   var saved = savedSettings();
+  // The location test runs on the side; the nearby board asks for itself.
+  if (!isNearby(saved)) testLocation();
   var dict = {};
   var rows = [];
   var nearby = isNearby(saved);
@@ -1211,7 +1276,7 @@ if (typeof module !== 'undefined') {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
     alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
     tagBusDestinations: tagBusDestinations, noteUsage: noteUsage, usageLines: usageLines,
-    testLocation: testLocation, locationLines: locationLines, nearbyName: nearbyName,
+    testLocation: testLocation, locationLines: locationLines, nearbyName: nearbyName, badgedName: badgedName,
     metersBetween: metersBetween,
     shortDest: shortDest
   };

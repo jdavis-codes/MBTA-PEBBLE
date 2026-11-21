@@ -10,7 +10,8 @@
 #define PERSIST_KEY_DATA 1
 #define PERSIST_KEY_SETTINGS 2
 #define PERSIST_KEY_DIAG 3
-#define PERSIST_KEY_TO 4
+// One key per station: a key holds at most 256 bytes. Key 4 held all three until 0.4.10.
+#define PERSIST_KEY_TO 5
 
 // Diagnostics. A breadcrumb in persistent storage records what the app was
 // doing, so that after a crash or a watch reset the next launch can report it
@@ -117,7 +118,7 @@ enum { LAYOUT_CLASSIC, LAYOUT_BOARD, LAYOUT_DIAL, LAYOUT_NEARBY, NUM_LAYOUTS };
 // Includes the terminator; what the nearby board shows in its column bar.
 #define NEAR_SIZE 12
 // Includes the terminator; must match TO_MAX_CHARS + 1 in src/pkjs/index.js.
-#define TO_SIZE 12
+#define TO_SIZE 15
 
 // The departure board: a strip with the clock and docks, a column bar, then
 // every upcoming train from all rows in time order.
@@ -1183,10 +1184,76 @@ static void prv_draw_classic(GContext *ctx, GRect bounds, int64_t now_ms) {
   }
 }
 
-// One board line's text, shifted by (dx, dy) for the outline behind a delayed train.
+// Line badges: the phone starts a destination with one of these characters.
+// Must match the BADGE_ characters in src/pkjs/index.js.
+#define BADGE_SUBWAY '^'
+#define BADGE_GREEN '~'
+#define BADGE_BUS '#'
+#define BADGE_RAIL '='
+#define BADGE_H 15
+
+// Draws the line badge that starts a destination, at (x, y), and returns its
+// width; *name is moved past it. Returns 0 when the destination has no badge.
+// A filled disc is the Red, Orange or Blue Line; a ring is a Green Line
+// branch; a box is a bus route; a solid slab is commuter rail.
+static int prv_draw_badge(GContext *ctx, const char **name, int x, int y, GColor fg, GColor bg,
+                          bool draw) {
+  const char *p = *name;
+  char kind = p[0];
+  char code[4] = "";
+  if (kind == BADGE_SUBWAY || kind == BADGE_GREEN) {
+    if (!p[1]) {
+      return 0;
+    }
+    code[0] = p[1];
+    p += 2;
+  } else if (kind == BADGE_BUS) {
+    int n = 0;
+    for (p++; *p && *p != ' '; p++) {
+      if (n < 3) {
+        code[n++] = *p;
+      }
+    }
+    if (*p == ' ') {
+      p++;
+    }
+  } else if (kind == BADGE_RAIL) {
+    strcpy(code, "CR");
+    p++;
+  } else {
+    return 0;
+  }
+  *name = p;
+  bool round = kind == BADGE_SUBWAY || kind == BADGE_GREEN;
+  bool solid = kind == BADGE_SUBWAY || kind == BADGE_RAIL;
+  int w = round ? BADGE_H : prv_text_width(code, s_header_font) + 6;
+  if (!draw) {
+    return w;
+  }
+  GRect box = GRect(x, y, w, BADGE_H);
+  graphics_context_set_fill_color(ctx, solid ? fg : bg);
+  graphics_context_set_stroke_color(ctx, fg);
+  graphics_context_set_stroke_width(ctx, 1);
+  if (round) {
+    GPoint c = GPoint(x + BADGE_H / 2, y + BADGE_H / 2);
+    graphics_fill_circle(ctx, c, BADGE_H / 2);
+    graphics_draw_circle(ctx, c, BADGE_H / 2);
+  } else {
+    graphics_fill_rect(ctx, box, 0, GCornerNone);
+    graphics_draw_rect(ctx, box);
+  }
+  graphics_context_set_text_color(ctx, solid ? bg : fg);
+  prv_draw_text(ctx, code, s_header_font, GRect(x - 4, y - 3, w + 9, 18), GTextAlignmentCenter);
+  graphics_context_set_text_color(ctx, fg);
+  return w;
+}
+
+// One board line's text, shifted by (dx, dy) for the outline behind a delayed
+// train. The badge is only drawn with the text itself, not with its outline.
 static void prv_draw_board_text(GContext *ctx, const BoardRow *row, int y, int width, int dx,
-                                int dy) {
+                                int dy, GColor fg, GColor bg) {
   bool cancelled = row->flag == FLAG_CANCELLED;
+  bool outline = dx || dy;
   prv_draw_text(ctx, row->time, s_board_font, GRect(2 + dx, y - 2 + dy, BOARD_TO_X, 24),
                 GTextAlignmentLeft);
   int to_x = BOARD_TO_X;
@@ -1196,7 +1263,12 @@ static void prv_draw_board_text(GContext *ctx, const BoardRow *row, int y, int w
                   GTextAlignmentLeft);
     to_x += 6;
   }
-  prv_draw_text(ctx, s_to[row->section][row->index], s_board_to_font,
+  const char *name = s_to[row->section][row->index];
+  int badge_w = prv_draw_badge(ctx, &name, to_x, y + 3, fg, bg, !outline);
+  if (badge_w) {
+    to_x += badge_w + 3;
+  }
+  prv_draw_text(ctx, name, s_board_to_font,
                 GRect(to_x + dx, y + 1 + dy, width - 3 - right_w - 4 - to_x, 20),
                 GTextAlignmentLeft);
   if (cancelled) {
@@ -1260,13 +1332,13 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
       for (int dy = -1; dy <= 1; dy++) {
         for (int dx = -1; dx <= 1; dx++) {
           if (dx || dy) {
-            prv_draw_board_text(ctx, row, y, width, dx, dy);
+            prv_draw_board_text(ctx, row, y, width, dx, dy, bg, fg);
           }
         }
       }
     }
     graphics_context_set_text_color(ctx, fg);
-    prv_draw_board_text(ctx, row, y, width, 0, 0);
+    prv_draw_board_text(ctx, row, y, width, 0, 0, fg, bg);
     graphics_context_set_stroke_color(ctx, fg);
     graphics_context_set_stroke_width(ctx, 1);
     if (cancelled) {
@@ -1785,7 +1857,9 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     persist_write_data(PERSIST_KEY_DATA, &s_data, sizeof(s_data));
   }
   if (to_changed) {
-    persist_write_data(PERSIST_KEY_TO, s_to, sizeof(s_to));
+    for (int section = 0; section < NUM_SECTIONS; section++) {
+      persist_write_data(PERSIST_KEY_TO + section, s_to[section], sizeof(s_to[section]));
+    }
   }
 
   Tuple *near = dict_find(iter, MESSAGE_KEY_NEAR);
@@ -1909,8 +1983,12 @@ static void prv_init(void) {
     s_data.dest[section][NUM_TIMES] = '\0';
     s_data.flags[section][NUM_TIMES] = '\0';
   }
-  if (persist_read_data(PERSIST_KEY_TO, s_to, sizeof(s_to)) != (int)sizeof(s_to)) {
-    memset(s_to, 0, sizeof(s_to));
+  persist_delete(4);
+  for (int section = 0; section < NUM_SECTIONS; section++) {
+    if (persist_read_data(PERSIST_KEY_TO + section, s_to[section], sizeof(s_to[section])) !=
+        (int)sizeof(s_to[section])) {
+      memset(s_to[section], 0, sizeof(s_to[section]));
+    }
   }
   for (int section = 0; section < NUM_SECTIONS; section++) {
     for (int i = 0; i < NUM_TIMES; i++) {

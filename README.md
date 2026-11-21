@@ -58,14 +58,20 @@ Both screens use demo data so that every marker appears at once.
 
 - **Departure board: nearby**: the departure board, but listing every train
   and bus leaving from stops within a set distance of your phone, in place of
-  your saved stations. Each line starts with the line or route (`RL` Red Line,
-  `OL` Orange Line, `BL` Blue Line, a Green Line branch letter, or a bus
-  number). The column bar shows the radius, for example `400m`, where the
+  your saved stations. The column bar shows the radius, for example `400m`, where the
   ordinary board says `TO`, or `NO FIX` when the phone can't give a position.
   The radius is set in the watchface settings, from 100 to 1000 meters. Your
   phone's position is sent to the MBTA to find the stops; the phone is asked
   for it at most every five minutes, and only while this layout is chosen.
   Departure warnings and service alerts don't apply to this layout.
+
+Both departure boards start each destination with a badge for its line,
+because the screen has no color to tell the lines apart.
+
+- Filled disc with a letter: the Red Line (`R`), Orange Line (`O`) or Blue Line (`B`).
+- Ring with a letter: a Green Line branch (`B`, `C`, `D` or `E`), or the Mattapan Line (`M`).
+- Box with a number: a bus, with its route number (for example `66` or `SL5`).
+- Solid block marked `CR`: commuter rail.
 
 Service alerts only scroll in the line by line layout. The departure board marks a
 train with `!` when its row has an alert; the hour dial does not show alerts.
