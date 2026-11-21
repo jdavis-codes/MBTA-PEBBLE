@@ -14,7 +14,7 @@ LOG := build/make.log
 # to a file instead of the terminal.
 QUIET := >$(LOG) 2>&1 </dev/null
 
-.PHONY: help setup build clean emu shot config logs kill wipe login status watch watch-logs watch-capture bump version
+.PHONY: help setup build clean emu emu-test dump test shot config logs kill wipe login status watch watch-retry watch-logs watch-capture bump version
 
 help: ## List the shortcuts
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -31,6 +31,24 @@ clean: ## Remove build output
 emu: build ## Build and run in the emulator (PLATFORM=flint|diorite)
 	@pebble install $(EMU) $(QUIET) || pebble install $(EMU) $(QUIET) || { tail -5 $(LOG); exit 1; }
 	@echo "Running on the $(PLATFORM) emulator."
+
+# A public landmark (Park Street station), so no real position is ever needed.
+LAYOUT ?= 3
+ROWS ?= 6
+SHOW ?= 0
+LAT ?= 42.35639
+LON ?= -71.06242
+emu-test: ## Emulator with a forced layout and a test position (LAYOUT=3 ROWS=6 SHOW=0 LAT= LON=)
+	@scripts/emu-test.py apply $(LAYOUT) $(ROWS) $(SHOW) $(LAT) $(LON)
+	@$(MAKE) --no-print-directory emu; status=$$?; scripts/emu-test.py restore; exit $$status
+
+DUMP ?= build/screen.png
+dump: ## Save the emulator screen straight from QEMU to DUMP=build/screen.png
+	@scripts/dump.py $(DUMP)
+
+test: ## Run the phone-side tests (TESTS=all also drives the settings page in Chromium)
+	@for t in tests/*.test.js; do node $$t >/dev/null || { echo "FAILED $$t"; exit 1; }; echo "ok $$t"; done
+	@if [ "$(TESTS)" = all ]; then node tests/settings-page.js; fi
 
 shot: ## Screenshot the emulator to SHOT=screenshot.png
 	@pebble screenshot $(EMU) --scale 6 --no-open $(SHOT) $(QUIET) || { tail -5 $(LOG); exit 1; }
@@ -57,6 +75,12 @@ status: ## Show whether the Pebble account is signed in
 watch: build ## Install on the real watch (waits 5 min for the Pebble app on your phone)
 	@timeout 300 pebble install --cloudpebble $(QUIET) || { tail -5 $(LOG); exit 1; }
 	@tail -1 $(LOG)
+
+watch-retry: build ## Like watch, but keeps trying for 30 minutes while the phone connects
+	@for i in 1 2 3 4 5 6; do \
+	  timeout 300 pebble install --cloudpebble $(QUIET); \
+	  grep -q "App install succeeded" $(LOG) && break; \
+	done; tail -1 $(LOG); grep -q "App install succeeded" $(LOG)
 
 watch-logs: ## Stream logs from the real watch and phone (Ctrl-C to stop)
 	pebble logs --cloudpebble
