@@ -801,7 +801,7 @@ function refreshBikes() {
 }
 
 // Must match TO_SIZE - 1 in src/c/watchface.c.
-var TO_MAX_CHARS = 14;
+var TO_MAX_CHARS = 16;
 var DEST_SHORT = [
   ['North Station', 'N Station'], ['South Station', 'S Station'], ['Government', 'Govt'],
   [' Street', ' St'], [' Square', ' Sq'], [' Center', ' Ctr'], [' Junction', ' Jct'],

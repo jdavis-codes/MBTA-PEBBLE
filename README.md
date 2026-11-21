@@ -115,6 +115,10 @@ in `src/pkjs/config.js`). You can access it from the Pebble app by clicking on t
 #### Settings options
 
 - **Layout**: changes watchface layout when saved to selected option
+- The settings page only shows the options that the chosen layout uses. Options that are hidden keep their values.
+- **Nearby radius** | ***Departure board: nearby only:*** how far from your phone the board looks for stops (100 to 1000 meters, default 400).
+- **Departures shown on the board** | ***Both departure boards:*** (6–8, default 6). With 7 or 8 the lines get shorter and the times smaller, which also leaves more room for the destination.
+- **Show each departure as** | ***Both departure boards:*** time and minutes, minutes only, or time only. Showing only one of the two leaves more room for the destination.
 - **Trains shown per station** | ***Line by Line layout only:*** (1–5, default 3). When displaying 4 or 5 the text shrinks to fit and the clock gets the freed-up space.
 - **Line → Direction → Station** Configure watched Stations. Leave any at None if you want fewer than three. The page loads these lists live from the MBTA API (`src/pkjs/config-page.js`): picking a line fills in its directions and stations.
 - **Buses** are at the end of the Line list, by route number. For a bus the third picker is called **Stop**, and its list changes with the direction, because a bus stops on opposite sides of the street in each direction. The watch shows the buses the MBTA is predicting, which reaches about an hour ahead, so a route that runs rarely can show one bus or none.

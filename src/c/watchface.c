@@ -118,14 +118,20 @@ enum { LAYOUT_CLASSIC, LAYOUT_BOARD, LAYOUT_DIAL, LAYOUT_NEARBY, NUM_LAYOUTS };
 // Includes the terminator; what the nearby board shows in its column bar.
 #define NEAR_SIZE 12
 // Includes the terminator; must match TO_MAX_CHARS + 1 in src/pkjs/index.js.
-#define TO_SIZE 15
+#define TO_SIZE 17
 
 // The departure board: a strip with the clock and docks, a column bar, then
 // every upcoming train from all rows in time order.
-#define BOARD_ROWS 6
+// The board shows 6 to 8 departures, chosen in the settings.
+#define BOARD_ROWS_MIN 6
+#define BOARD_ROWS 8
+#define BOARD_ROWS_H 132
+// What each board line shows: must match the options in src/pkjs/config.js.
+#define BOARD_SHOW_BOTH 0
+#define BOARD_SHOW_MINUTES 1
+#define BOARD_SHOW_TIME 2
 #define BOARD_TOP 24
 #define BOARD_BAR_H 12
-#define BOARD_ROW_H 22
 #define BOARD_TO_X 46
 
 // The hour dial: one ring per row, each train at the minute it departs.
@@ -177,6 +183,8 @@ typedef struct {
   uint8_t departures;
   char labels[NUM_SECTIONS][LABEL_SIZE];
   uint8_t layout;
+  uint8_t board_rows;
+  uint8_t board_show;
 } Settings;
 
 typedef struct {
@@ -750,11 +758,16 @@ static void prv_diag_init(void) {
   prv_breadcrumb(STAGE_INIT, 0);
 }
 
+// With more than six lines the board's times and minutes use the smaller font.
+static GFont prv_board_font(void) {
+  return s_settings.board_rows > BOARD_ROWS_MIN ? s_header_font : s_board_font;
+}
+
 // Fills the departure board: the next trains from every row, soonest first.
 static void prv_build_board(time_t now) {
   int next[NUM_SECTIONS] = { 0 };
   s_board_count = 0;
-  while (s_board_count < BOARD_ROWS) {
+  while (s_board_count < s_settings.board_rows) {
     int best = -1;
     for (int section = 0; section < NUM_SECTIONS; section++) {
       const int32_t *times = s_data.times[section];
@@ -782,7 +795,7 @@ static void prv_build_board(time_t now) {
     } else {
       snprintf(row->mins, sizeof(row->mins), "%d", mins > 999 ? 999 : mins);
     }
-    row->mins_w = (uint8_t)prv_text_width(row->mins, s_board_font);
+    row->mins_w = (uint8_t)prv_text_width(row->mins, prv_board_font());
   }
 }
 
@@ -1248,34 +1261,52 @@ static int prv_draw_badge(GContext *ctx, const char **name, int x, int y, GColor
   return w;
 }
 
+// Where the destination column starts: after the time column when it is shown.
+static int prv_board_to_x(void) {
+  if (s_settings.board_show == BOARD_SHOW_MINUTES) {
+    return 3;
+  }
+  return s_settings.board_rows > BOARD_ROWS_MIN ? prv_text_width("00:00", s_header_font) + 7
+                                                : BOARD_TO_X;
+}
+
 // One board line's text, shifted by (dx, dy) for the outline behind a delayed
 // train. The badge is only drawn with the text itself, not with its outline.
 static void prv_draw_board_text(GContext *ctx, const BoardRow *row, int y, int width, int dx,
                                 int dy, GColor fg, GColor bg) {
   bool cancelled = row->flag == FLAG_CANCELLED;
   bool outline = dx || dy;
-  prv_draw_text(ctx, row->time, s_board_font, GRect(2 + dx, y - 2 + dy, BOARD_TO_X, 24),
-                GTextAlignmentLeft);
-  int to_x = BOARD_TO_X;
-  int right_w = cancelled ? 30 : row->mins_w;
+  bool small = s_settings.board_rows > BOARD_ROWS_MIN;
+  bool show_time = s_settings.board_show != BOARD_SHOW_MINUTES;
+  bool show_mins = s_settings.board_show != BOARD_SHOW_TIME;
+  GFont font = prv_board_font();
+  int row_h = BOARD_ROWS_H / s_settings.board_rows;
+  // Text sits higher in a shorter line: the fonts carry their own top padding.
+  int text_y = y + 1 - (22 - row_h + 1) / 2;
+  int big_y = small ? text_y : y - 2;
+  int to_x = prv_board_to_x();
+  if (show_time) {
+    prv_draw_text(ctx, row->time, font, GRect(2 + dx, big_y + dy, to_x, 24), GTextAlignmentLeft);
+  }
+  int right_w = cancelled ? 30 : show_mins ? row->mins_w : 0;
   if (s_alerts[row->section][0]) {
-    prv_draw_text(ctx, "!", s_header_font, GRect(to_x + dx, y + 1 + dy, 8, 20),
+    prv_draw_text(ctx, "!", s_header_font, GRect(to_x + dx, text_y + dy, 8, 20),
                   GTextAlignmentLeft);
     to_x += 6;
   }
   const char *name = s_to[row->section][row->index];
-  int badge_w = prv_draw_badge(ctx, &name, to_x, y + 3, fg, bg, !outline);
+  int badge_w = prv_draw_badge(ctx, &name, to_x, text_y + 2, fg, bg, !outline);
   if (badge_w) {
     to_x += badge_w + 3;
   }
   prv_draw_text(ctx, name, s_board_to_font,
-                GRect(to_x + dx, y + 1 + dy, width - 3 - right_w - 4 - to_x, 20),
+                GRect(to_x + dx, text_y + dy, width - 3 - right_w - (right_w ? 4 : 0) - to_x, 20),
                 GTextAlignmentLeft);
   if (cancelled) {
-    prv_draw_text(ctx, "CANC", s_header_font, GRect(width - 43 + dx, y + 1 + dy, 40, 20),
+    prv_draw_text(ctx, "CANC", s_header_font, GRect(width - 43 + dx, text_y + dy, 40, 20),
                   GTextAlignmentRight);
-  } else {
-    prv_draw_text(ctx, row->mins, s_board_font, GRect(width - 43 + dx, y - 2 + dy, 40, 24),
+  } else if (show_mins) {
+    prv_draw_text(ctx, row->mins, font, GRect(width - 43 + dx, big_y + dy, 40, 24),
                   GTextAlignmentRight);
   }
 }
@@ -1292,9 +1323,15 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
   graphics_fill_rect(ctx, GRect(0, BOARD_TOP, width, BOARD_BAR_H), 0, GCornerNone);
   graphics_context_set_text_color(ctx, GColorBlack);
   GRect bar = GRect(3, BOARD_TOP - 4, width - 6, 18);
-  prv_draw_text(ctx, "TIME", s_header_font, bar, GTextAlignmentLeft);
-  prv_draw_text(ctx, "MIN", s_header_font, bar, GTextAlignmentRight);
-  bar.origin.x = BOARD_TO_X;
+  if (s_settings.board_show != BOARD_SHOW_MINUTES) {
+    prv_draw_text(ctx, "TIME", s_header_font, bar, GTextAlignmentLeft);
+  }
+  if (s_settings.board_show != BOARD_SHOW_TIME) {
+    prv_draw_text(ctx, "MIN", s_header_font, bar, GTextAlignmentRight);
+  }
+  // "TIME" is wider than the times beneath it in the smaller font.
+  int to_x = prv_board_to_x();
+  bar.origin.x = to_x > 3 && to_x < BOARD_TO_X ? BOARD_TO_X - 6 : to_x;
   // The nearby board says how far it is looking in place of "TO".
   bool nearby = s_settings.layout == LAYOUT_NEARBY;
   prv_draw_text(ctx, nearby && s_near[0] ? s_near : "TO", s_header_font, bar, GTextAlignmentLeft);
@@ -1311,16 +1348,17 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
                   GRect(0, rows_top + 40, width, 24), GTextAlignmentCenter);
     return;
   }
+  int row_h = BOARD_ROWS_H / s_settings.board_rows;
   for (int i = 0; i < s_board_count; i++) {
     const BoardRow *row = &s_board[i];
-    int y = rows_top + i * BOARD_ROW_H;
+    int y = rows_top + i * row_h;
     bool cancelled = row->flag == FLAG_CANCELLED;
     // The saved stations' departure warnings do not apply to nearby departures.
     bool inverted = !cancelled && !nearby &&
                     prv_is_highlighted(row->section, row->departure, now_ms);
     GColor fg = inverted ? GColorBlack : GColorWhite;
     GColor bg = inverted ? GColorWhite : GColorBlack;
-    GRect line = GRect(0, y, width, BOARD_ROW_H - 1);
+    GRect line = GRect(0, y, width, row_h - 1);
     if (inverted) {
       graphics_context_set_fill_color(ctx, bg);
       graphics_fill_rect(ctx, line, 0, GCornerNone);
@@ -1342,12 +1380,12 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
     graphics_context_set_stroke_color(ctx, fg);
     graphics_context_set_stroke_width(ctx, 1);
     if (cancelled) {
-      graphics_draw_line(ctx, GPoint(2, y + 11), GPoint(width - 40, y + 11));
+      graphics_draw_line(ctx, GPoint(2, y + row_h / 2), GPoint(width - 40, y + row_h / 2));
     }
     if (!inverted) {
       // Starts one pixel in so the dots sit the same distance from both edges.
       for (int x = 1; x < width; x += 3) {
-        graphics_draw_pixel(ctx, GPoint(x, y + BOARD_ROW_H - 1));
+        graphics_draw_pixel(ctx, GPoint(x, y + row_h - 1));
       }
     }
   }
@@ -1603,6 +1641,8 @@ static void prv_default_settings(void) {
     .warn_end_min = { 5, 5, 5 },
     .departures = DEFAULT_DEPARTURES,
     .labels = { "", "", "" },
+    .board_rows = BOARD_ROWS_MIN,
+    .board_show = BOARD_SHOW_BOTH,
   };
 }
 
@@ -1614,6 +1654,12 @@ static void prv_load_settings(void) {
   }
   if (s_settings.layout >= NUM_LAYOUTS) {
     s_settings.layout = LAYOUT_CLASSIC;
+  }
+  if (s_settings.board_rows < BOARD_ROWS_MIN || s_settings.board_rows > BOARD_ROWS) {
+    s_settings.board_rows = BOARD_ROWS_MIN;
+  }
+  if (s_settings.board_show > BOARD_SHOW_TIME) {
+    s_settings.board_show = BOARD_SHOW_BOTH;
   }
 }
 
@@ -1668,6 +1714,17 @@ static bool prv_read_settings(DictionaryIterator *iter) {
   if ((t = dict_find(iter, MESSAGE_KEY_LAYOUT))) {
     int32_t v = prv_tuple_int(t);
     s_settings.layout = v < 0 || v >= NUM_LAYOUTS ? LAYOUT_CLASSIC : (uint8_t)v;
+    changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_BOARD_ROWS))) {
+    int32_t v = prv_tuple_int(t);
+    s_settings.board_rows = v < BOARD_ROWS_MIN ? BOARD_ROWS_MIN : v > BOARD_ROWS ? BOARD_ROWS
+                                                                                  : (uint8_t)v;
+    changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_BOARD_SHOW))) {
+    int32_t v = prv_tuple_int(t);
+    s_settings.board_show = v < 0 || v > BOARD_SHOW_TIME ? BOARD_SHOW_BOTH : (uint8_t)v;
     changed = true;
   }
   if (changed) {

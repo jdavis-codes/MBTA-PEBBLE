@@ -39,7 +39,7 @@ function rowSection(row, i, saved) {
   return {
     type: 'section',
     items: [
-      { type: 'heading', defaultValue: 'Station ' + (i + 1) },
+      { type: 'heading', id: 'station-' + i, defaultValue: 'Station ' + (i + 1) },
       {
         type: 'select',
         messageKey: 'ROUTE[' + i + ']',
@@ -192,11 +192,10 @@ function buildConfig(saved, usage, location) {
           type: 'slider',
           messageKey: 'RADIUS',
           label: 'Nearby radius (meters)',
-          description: 'Departure board: nearby only. It lists every train and bus ' +
-                       'leaving from stops within this distance of your phone, in ' +
-                       'place of your saved stations. The watch shows the radius ' +
-                       'above the list. Your phone\'s position is sent to the MBTA ' +
-                       'to find the stops.',
+          description: 'The board lists every train and bus leaving from stops ' +
+                       'within this distance of your phone, in place of your saved ' +
+                       'stations. The watch shows the radius above the list. Your ' +
+                       'phone\'s position is sent to the MBTA to find the stops.',
           defaultValue: 400,
           min: 100,
           max: 1000,
@@ -204,10 +203,33 @@ function buildConfig(saved, usage, location) {
         },
         {
           type: 'slider',
+          messageKey: 'BOARD_ROWS',
+          label: 'Departures shown on the board',
+          description: 'With 7 or 8 departures the lines get shorter and the times ' +
+                       'smaller, which also leaves more room for the destination.',
+          defaultValue: 6,
+          min: 6,
+          max: 8,
+          step: 1
+        },
+        {
+          type: 'select',
+          messageKey: 'BOARD_SHOW',
+          label: 'Show each departure as',
+          description: 'Showing only one of the two leaves more room for the ' +
+                       'destination.',
+          defaultValue: '0',
+          options: [
+            { label: 'Time and minutes', value: '0' },
+            { label: 'Minutes only', value: '1' },
+            { label: 'Time only', value: '2' }
+          ]
+        },
+        {
+          type: 'slider',
           messageKey: 'DEPARTURES',
           label: 'Trains shown per station',
-          description: 'Line by line layout only. With 4 or 5 trains the text gets ' +
-                       'smaller to fit.',
+          description: 'With 4 or 5 trains the text gets smaller to fit.',
           defaultValue: 3,
           min: 1,
           max: 5,
@@ -215,7 +237,8 @@ function buildConfig(saved, usage, location) {
         }
       ]
     },
-    { type: 'heading', size: 4, defaultValue: 'Choose up to 3 stations or bus stops to watch' },
+    { type: 'heading', id: 'stations-heading', size: 4,
+      defaultValue: 'Choose up to 3 stations or bus stops to watch' },
     { type: 'text', id: 'mbta-status', defaultValue: 'Loading MBTA lines…' }
   ].concat(ROWS.map(function(row, i) {
     return rowSection(row, i, saved);
