@@ -144,7 +144,7 @@ The `version` in `package.json` is what the Pebble phone app shows for the watch
 - Format is `major.minor.patch`, digits only (no `-beta` style suffixes; the build fails). Major and minor must each be 0-255. Patch can be any whole number, but only major and minor are stored in the watch binary, so do not rely on patch on the watch side.
 - `main` is `0.0.x`. Each new branch takes the next minor and starts at patch 0. The owner may also call for the next minor for a large change on the same branch (`claude/pebble-dev-tools-setup-ghhvea` went `0.1.x`, `0.2.x` for Bluebikes, `0.3.x` for the layouts, `0.4.x` for buses).
 - Raise the patch (`make bump`) for every build that is installed on the watch for the user to look at, before the install, so each install shows a new number. Say the version in the message that asks the user to open the app.
-- Tags are made by GitHub Actions (`.github/workflows/ci.yml`): when a push to `main` carries a version in `package.json` that has no tag yet, the workflow tags that commit `v<version>` and publishes a GitHub release with the built `.pbw` attached. Do not create tags by hand. Versions that only ever lived on a branch are not tagged.
+- Tags are made by GitHub Actions (`.github/workflows/ci.yml`): when a push to `main` carries a version in `package.json` that has no tag yet, the workflow tags that commit with the bare version (`0.4.15`, no "v") and publishes a GitHub release with the built `.pbw` attached. Do not create tags by hand. Versions that only ever lived on a branch are not tagged.
 - The same workflow runs `make test` and builds the app on every push and pull request.
 
 ## Documentation Voice

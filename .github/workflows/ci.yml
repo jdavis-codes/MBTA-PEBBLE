@@ -1,5 +1,5 @@
 # Tests and builds every push. On main, a version in package.json that has no
-# tag yet is tagged v<version> and released with the built .pbw attached.
+# tag yet is tagged with that version and released with the built .pbw attached.
 name: CI
 
 on:
@@ -50,10 +50,10 @@ jobs:
         run: |
           version=$(node -p 'require("./package.json").version')
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if gh release view "v$version" >/dev/null 2>&1 || \
-             git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+          if gh release view "$version" >/dev/null 2>&1 || \
+             git ls-remote --exit-code --tags origin "refs/tags/$version" >/dev/null 2>&1; then
             echo "new=false" >> "$GITHUB_OUTPUT"
-            echo "v$version is already tagged: nothing to release."
+            echo "$version is already tagged: nothing to release."
           else
             echo "new=true" >> "$GITHUB_OUTPUT"
           fi
@@ -67,5 +67,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "v$VERSION" "mbta-pebble-$VERSION.pbw" \
+          gh release create "$VERSION" "mbta-pebble-$VERSION.pbw" \
             --target "$GITHUB_SHA" --title "MBTA Pebble $VERSION" --generate-notes
