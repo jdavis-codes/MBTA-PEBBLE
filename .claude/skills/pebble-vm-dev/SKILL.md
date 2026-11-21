@@ -51,6 +51,22 @@ Things that cost time if you do not know them:
 - Target platforms are `diorite` and `flint` (see `package.json`). Both are
   144x168 black and white.
 
+### A forced layout and a test position
+
+The emulator has no location service and no saved settings, so the layouts that
+need them cannot be reached by hand. `make emu-test` patches the phone side for
+one run and restores it afterwards:
+
+```sh
+make emu-test LAYOUT=3 ROWS=8 SHOW=1   # nearby board, 8 departures, minutes only
+make dump DUMP=/abs/path/screen.png    # the screen, straight from QEMU
+```
+
+`LAYOUT` is 0 to 3, `ROWS` 6 to 8, `SHOW` 0 (time and minutes), 1 (minutes), 2
+(time). The position defaults to Park Street station and the data is live, so
+leave the emulator clock alone. Wait about 25 seconds after it starts before
+capturing.
+
 ### Testing the Bluetooth state
 
 `pebble emu-bt-connection --emulator diorite --vnc --connected no` works on
@@ -93,10 +109,12 @@ the background, tell the user in the same turn to open the app, and carry on
 when it finishes:
 
 ```sh
-make watch        # waits up to 5 minutes for the phone
+make watch-retry  # keeps trying for 30 minutes while the phone connects
+make watch        # one attempt, waits up to 5 minutes
 ```
 
-If it times out, say so and start it again when the user is ready.
+The connection often drops on the first attempt, which is why the retry exists.
+If it runs out, say so, stop retrying, and start again when the user is back.
 
 After a successful install, commit locally but **do not `git push` until the
 user has confirmed the change on the watch**. Changes that do not affect the

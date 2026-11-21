@@ -76,10 +76,43 @@ module.exports = function() {
     return clayConfig.getItemByMessageKey(key + '[' + row + ']');
   }
 
+  // Must match the Layout options in config.js.
+  var LAYOUT_LINES = '0', LAYOUT_BOARD = '1', LAYOUT_DIAL = '2', LAYOUT_NEARBY = '3';
+  var stationsHidden = false;
+  var statusText = '';
+
+  function setShown(item, shown) {
+    if (!item) return;
+    if (shown) item.show(); else item.hide();
+  }
+
+  // Only the settings that the chosen layout uses are shown. Hidden settings
+  // keep their values.
+  function applyLayout() {
+    var layout = String(clayConfig.getItemByMessageKey('LAYOUT').get());
+    var board = layout === LAYOUT_BOARD || layout === LAYOUT_NEARBY;
+    setShown(clayConfig.getItemByMessageKey('RADIUS'), layout === LAYOUT_NEARBY);
+    setShown(clayConfig.getItemByMessageKey('BOARD_ROWS'), board);
+    setShown(clayConfig.getItemByMessageKey('BOARD_SHOW'), board);
+    setShown(clayConfig.getItemByMessageKey('DEPARTURES'), layout === LAYOUT_LINES);
+    // The nearby board lists whatever is around the phone, so it has no stations to choose.
+    stationsHidden = layout === LAYOUT_NEARBY;
+    setShown(clayConfig.getItemById('stations-heading'), !stationsHidden);
+    for (var row = 0; row < NUM_ROWS; row++) {
+      var heading = clayConfig.getItemById('station-' + row);
+      var section = heading && heading.$element[0].parentNode;
+      if (section) section.style.display = stationsHidden ? 'none' : '';
+      // The hour dial has no room for alerts.
+      setShown(rowItem('ALERT_ON', row), layout !== LAYOUT_DIAL);
+    }
+    setStatus(statusText);
+  }
+
   function setStatus(text) {
     var status = clayConfig.getItemById('mbta-status');
     if (!status) return;
-    if (text) {
+    statusText = text;
+    if (text && !stationsHidden) {
       status.set(text);
       status.show();
     } else {
@@ -390,7 +423,11 @@ module.exports = function() {
   // Bluebikes docks: each slot has a search box that filters the select below it.
   var NUM_BIKES = 9;
   var BIKE_MATCH_LIMIT = 40;
-  var BIKE_INFO_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_information.json';
+  // Bluebikes' own address compresses the download; Lyft's is the fallback.
+  var BIKE_INFO_URLS = [
+    'https://gbfs.bluebikes.com/gbfs/en/station_information.json',
+    'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_information.json'
+  ];
   var bikeStations = null;
 
   function setBikeStatus(text) {
@@ -436,9 +473,11 @@ module.exports = function() {
     setOptions(item, options, current);
   }
 
-  function loadBikeStations() {
+  function loadBikeStations(attempt) {
+    attempt = attempt || 0;
+    var retry = attempt + 1 < BIKE_INFO_URLS.length;
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', BIKE_INFO_URL, true);
+    xhr.open('GET', BIKE_INFO_URLS[attempt], true);
     xhr.onload = function() {
       try {
         bikeStations = JSON.parse(xhr.responseText).data.stations.map(function(s) {
@@ -448,10 +487,12 @@ module.exports = function() {
         });
         setBikeStatus('');
       } catch (e) {
+        if (retry) return loadBikeStations(attempt + 1);
         setBikeStatus('Could not load Bluebikes docks. Check your connection.');
       }
     };
     xhr.onerror = function() {
+      if (retry) return loadBikeStations(attempt + 1);
       setBikeStatus('Could not load Bluebikes docks. Check your connection.');
     };
     xhr.send();
@@ -469,6 +510,9 @@ module.exports = function() {
       })(slot);
     }
     loadBikeStations();
+
+    clayConfig.getItemByMessageKey('LAYOUT').on('change', applyLayout);
+    applyLayout();
 
     for (var row = 0; row < NUM_ROWS; row++) {
       (function(r) {

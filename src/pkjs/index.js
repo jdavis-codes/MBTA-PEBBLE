@@ -36,7 +36,18 @@ var ALERT_MAX_CHARS = 160;
 
 // Bluebikes dock status (GBFS). The feed has no per-station query, so the
 // whole system's status is fetched each time.
-var BIKE_STATUS_URL = 'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json';
+// The same feed is served from two addresses. Bluebikes' own compresses the
+// download (about 18 KB instead of 234 KB), so it is tried first; Lyft's is
+// the published one and is the fallback.
+var BIKE_STATUS_URLS = [
+  'https://gbfs.bluebikes.com/gbfs/en/station_status.json',
+  'https://gbfs.lyft.com/gbfs/1.1/bos/en/station_status.json'
+];
+// Roughly what gzip leaves of the dock feed, for downloads whose size on the
+// wire the phone does not report.
+var BIKE_GZIP_RATIO = 0.076;
+// The same for MBTA replies, which are smaller and compress less well.
+var TRAIN_GZIP_RATIO = 0.2;
 // Must match NUM_BIKES and BIKE_LEVELS in src/c/watchface.c.
 var NUM_BIKES = 9;
 var BIKE_LEVELS = 8;
@@ -48,6 +59,7 @@ var BIKE_FULL = BIKE_LEVELS + 2;
 var BIKE_MAX_EBIKES = 8;
 // What the watch's REQUEST message asks for; must match src/c/watchface.c.
 var REQUEST_BIKES = 2;
+var REQUEST_POSITION = 3;
 
 // A fetch still unfinished after this long is treated as hung and abandoned.
 // The iOS Pebble app has no XMLHttpRequest timeout and suspends timers in the
@@ -86,6 +98,225 @@ function buildQuery(params) {
   return parts.join('&');
 }
 
+// Data usage. Every download is counted per day in localStorage, split into
+// trains (MBTA) and bikes (Bluebikes): how many, how much data they held, and
+// how much of that crossed the network where the phone reports it.
+var USAGE_KEY = 'usage';
+var USAGE_DAYS = 3;
+
+function usageDay(offset) {
+  var d = new Date(Date.now() - (offset || 0) * 86400000);
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+
+function loadUsage() {
+  try {
+    return JSON.parse(localStorage.getItem(USAGE_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function header(xhr, name) {
+  try {
+    return xhr.getResponseHeader(name) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function noteUsage(kind, xhr) {
+  var size = xhr.responseText ? xhr.responseText.length : 0;
+  var length = parseInt(header(xhr, 'Content-Length'), 10);
+  var etag = header(xhr, 'ETag');
+  // A phone that unpacks a compressed reply drops its Content-Encoding and
+  // Content-Length headers before the code sees them. Two things still give
+  // it away: the dock feed marks its compressed copy with a weak ETag ("W/"),
+  // and both servers always send a length with an uncompressed reply.
+  var gzip = /gzip|br|deflate/i.test(header(xhr, 'Content-Encoding')) || /^W\//.test(etag) ||
+             (!(length > 0) && header(xhr, 'Content-Type') !== '');
+  var usage = loadUsage();
+  var today = usageDay(0);
+  var day = usage[today] || (usage[today] = {});
+  // What the phone lets the code see of the last reply, to tell "not
+  // compressed" apart from "the phone hides the reply's headers".
+  var all = '';
+  try {
+    all = xhr.getAllResponseHeaders() || '';
+  } catch (e) {
+    all = 'error: ' + e.message;
+  }
+  day[kind + 'Seen'] = 'type=' + (header(xhr, 'Content-Type') || 'none') +
+                       ', encoding=' + (header(xhr, 'Content-Encoding') || 'none') +
+                       ', length=' + (header(xhr, 'Content-Length') || 'none') +
+                       ', etag=' + (etag ? etag.substring(0, 6) : 'none') +
+                       ', counted as ' + (gzip ? 'compressed' : 'not compressed') +
+                       ', ' + all.length + ' characters of headers, ' + size + ' of data';
+  var u = day[kind] || (day[kind] = { n: 0, data: 0, wire: 0, gz: 0, est: 0 });
+  u.n++;
+  u.data += size;
+  if (gzip) u.gz++;
+  if (length > 0) {
+    // A reported length is the size on the wire, compressed or not.
+    u.wire += length;
+  } else if (gzip) {
+    // Compressed, but the phone does not say by how much: estimate it.
+    u.wire += Math.round(size * (kind === 'bikes' ? BIKE_GZIP_RATIO : TRAIN_GZIP_RATIO));
+    u.est++;
+  } else {
+    u.wire += size;
+  }
+  // Keep only the last few days.
+  Object.keys(usage).sort().slice(0, -USAGE_DAYS).forEach(function(k) { delete usage[k]; });
+  try {
+    localStorage.setItem(USAGE_KEY, JSON.stringify(usage));
+  } catch (e) { /* storage full: usage is only a diagnostic */ }
+}
+
+function megabytes(bytes) {
+  return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
+}
+
+// The settings page gets two lines: today's Bluebikes and MBTA totals. With
+// detail, for the logs, yesterday is added, along with how many requests were
+// compressed and what the phone exposed about the last reply.
+function usageLines(detail) {
+  var usage = loadUsage();
+  var lines = [];
+  var days = [[usageDay(0), 'Today']];
+  if (detail) days.push([usageDay(1), 'Yesterday']);
+  days.forEach(function(d) {
+    var day = usage[d[0]] || {};
+    [['bikes', 'Bluebikes'], ['trains', 'MBTA']].forEach(function(k) {
+      var u = day[k[0]];
+      if (!u) {
+        if (!detail) lines.push(d[1] + ', ' + k[1] + ': nothing downloaded yet');
+        return;
+      }
+      lines.push(d[1] + ', ' + k[1] + ': ' + (u.est ? 'about ' : '') + megabytes(u.wire) +
+                 ' in ' + u.n + (u.n === 1 ? ' request' : ' requests') +
+                 (detail && u.gz ? ' (' + u.gz + ' compressed, ' + megabytes(u.data) + ' uncompressed)' : ''));
+      if (detail && day[k[0] + 'Seen']) lines.push('Last ' + k[1] + ' reply: ' + day[k[0] + 'Seen']);
+    });
+  });
+  return lines;
+}
+
+// Location test. Each time the watch asks for fresh data the phone is also
+// asked where it is, the way the open-source weather faces do it (TimeStyle,
+// pebble-generic-weather: getCurrentPosition with a 15 s timeout and a fix up
+// to a minute old). Nothing is done with the position yet: the point is to
+// learn whether the phone answers while the Pebble app is in the background.
+// The results are kept per day in localStorage and shown in the settings.
+var LOCATION_KEY = 'locationTest';
+var LOCATION_OPTIONS = { timeout: 15000, maximumAge: 60000, enableHighAccuracy: false };
+
+function loadLocationTest() {
+  try {
+    var t = JSON.parse(localStorage.getItem(LOCATION_KEY)) || {};
+    return t.day === usageDay(0) ? t : { day: usageDay(0), asked: 0, ok: 0, failed: 0, gap: 0 };
+  } catch (e) {
+    return { day: usageDay(0), asked: 0, ok: 0, failed: 0, gap: 0 };
+  }
+}
+
+function saveLocationTest(t) {
+  try {
+    localStorage.setItem(LOCATION_KEY, JSON.stringify(t));
+  } catch (e) { /* only a diagnostic */ }
+}
+
+// One request to the phone at a time. A request the phone never answers must
+// not hold up the timetables or pile up behind itself, so it is given up on
+// after LOCATION_HUNG_MS, by a timer and, because the iPhone app suspends
+// timers in the background, by the clock when the next request comes in.
+var LOCATION_HUNG_MS = 20 * 1000;
+var s_locating = 0;       // when the request in flight was made, or 0
+var s_locationId = 0;
+var s_locationWaiters = [];
+
+function finishLocation(id, err, pos) {
+  if (id !== s_locationId || !s_locating) return;
+  var started = s_locating;
+  s_locating = 0;
+  var r = loadLocationTest();
+  var now = Date.now();
+  if (pos) {
+    r.ok++;
+    // The longest wait between two answers shows up background stalls.
+    if (r.lastOk && now - r.lastOk > r.gap) r.gap = now - r.lastOk;
+    r.lastOk = now;
+    r.took = now - started;
+    r.accuracy = Math.round(pos.coords.accuracy || 0);
+    r.age = pos.timestamp ? Math.max(0, Math.round((now - pos.timestamp) / 1000)) : -1;
+    // Rounded to about a kilometre: enough to see it is right, and it never leaves the phone.
+    r.where = pos.coords.latitude.toFixed(2) + ', ' + pos.coords.longitude.toFixed(2);
+  } else {
+    r.failed++;
+    r.error = err + ' at ' + clockTime(now);
+  }
+  saveLocationTest(r);
+  var waiters = s_locationWaiters;
+  s_locationWaiters = [];
+  waiters.forEach(function(w) {
+    try { w(pos ? null : new Error(err), pos); } catch (e) { console.log('Location waiter: ' + e); }
+  });
+}
+
+// Asks the phone where it is; callback(err, pos) is optional.
+function askLocation(callback) {
+  if (callback) s_locationWaiters.push(callback);
+  if (s_locating) {
+    if (Date.now() - s_locating < LOCATION_HUNG_MS) return;
+    finishLocation(s_locationId, 'no answer from the phone');
+    // finishLocation called the waiters, this one included.
+    return;
+  }
+  var id = ++s_locationId;
+  s_locating = Date.now();
+  var t = loadLocationTest();
+  t.asked++;
+  saveLocationTest(t);
+  try {
+    var geo = typeof navigator !== 'undefined' && navigator.geolocation;
+    if (!geo) return finishLocation(id, 'the phone offers no location service to the watchface');
+    geo.getCurrentPosition(function(pos) {
+      finishLocation(id, null, pos);
+    }, function(err) {
+      finishLocation(id, err && err.code === 1 ? 'permission denied'
+                         : err && err.code === 3 ? 'timed out' : 'position unavailable');
+    }, LOCATION_OPTIONS);
+    setTimeout(function() { finishLocation(id, 'no answer from the phone'); }, LOCATION_HUNG_MS);
+  } catch (e) {
+    finishLocation(id, 'the location request could not be made');
+  }
+}
+
+function testLocation() {
+  askLocation(null);
+}
+
+function clockTime(ms) {
+  var d = new Date(ms);
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+
+function locationLines() {
+  var t = loadLocationTest();
+  if (!t.asked) return ['Not asked yet today.'];
+  var lost = Math.max(0, t.asked - t.ok - t.failed - (s_locating ? 1 : 0));
+  var lines = ['Asked ' + t.asked + (t.asked === 1 ? ' time' : ' times') + ' today: ' + t.ok +
+               ' answered, ' + t.failed + ' failed' + (lost ? ', ' + lost + ' lost' : '') + '.'];
+  if (t.lastOk) {
+    lines.push('Last answer at ' + clockTime(t.lastOk) + ': within ' + t.accuracy + ' m, ' +
+               (t.age < 0 ? 'age unknown' : t.age + ' s old') + ', took ' +
+               (t.took / 1000).toFixed(1) + ' s. Near ' + t.where + '.');
+    lines.push('Longest wait between answers: ' + Math.round(t.gap / 60000) + ' min.');
+  }
+  if (t.error) lines.push('Last failure: ' + t.error + '.');
+  return lines;
+}
+
 function apiGet(path, params, callback) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', API_BASE + path + '?' + buildQuery(params), true);
@@ -94,6 +325,7 @@ function apiGet(path, params, callback) {
     xhr.setRequestHeader('x-api-key', MBTA_API_KEY);
   }
   xhr.onload = function() {
+    noteUsage('trains', xhr);
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
         callback(null, JSON.parse(xhr.responseText));
@@ -116,6 +348,7 @@ function getJson(url, callback) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   xhr.onload = function() {
+    noteUsage('bikes', xhr);
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
         callback(null, JSON.parse(xhr.responseText));
@@ -155,8 +388,8 @@ function bostonOffsetHours(ms) {
 // Boston time. MBTA service days run past midnight (e.g. "25:10"), so before
 // 3am that is yesterday's date with hours >= 24, plus today's service day so
 // the first morning trains show once the last night train has gone.
-function serviceWindows(nowMs) {
-  var startMs = nowMs - LOOKBACK_MS;
+function serviceWindows(nowMs, lookbackMs) {
+  var startMs = nowMs - (lookbackMs === undefined ? LOOKBACK_MS : lookbackMs);
   // Shifted so the UTC getters read Boston wall-clock time.
   var start = new Date(startMs + bostonOffsetHours(startMs) * 3600000);
   function ymd(d) {
@@ -301,7 +534,7 @@ function fetchCommuterRail(row, callback) {
                    : predicted && predicted - scheduled >= DELAY_SEC ? FLAG_DELAYED : FLAG_NONE;
           if (t > nowSec) {
             trains.push({ time: t, dest: ' ', flag: flag,
-                          to: shortDest(trip && trip.attributes.headsign) });
+                          to: badgedName(row.route, '', trip && trip.attributes.headsign) });
           }
         });
       }
@@ -421,7 +654,8 @@ function fetchPredictions(row, showBranches, callback) {
       if (showBranches) {
         dest = branchLetter(rel.route && rel.route.data ? rel.route.data.id : '', headsign);
       }
-      trains.push({ time: t, dest: dest, to: shortDest(headsign), headsign: headsign });
+      var routeId = rel.route && rel.route.data ? rel.route.data.id : row.route;
+      trains.push({ time: t, dest: dest, to: badgedName(routeId, '', headsign), headsign: headsign });
     });
     trains.sort(function(x, y) { return x.time - y.time; });
     trains = trains.slice(0, MAX_TIMES);
@@ -517,9 +751,17 @@ function bikeLetter(station) {
 }
 
 // Calls back with the status string for the given dock slots.
-function fetchBikes(ids, callback) {
-  getJson(BIKE_STATUS_URL, function(err, json) {
-    if (err) return callback(err);
+function fetchBikes(ids, callback, attempt) {
+  attempt = attempt || 0;
+  getJson(BIKE_STATUS_URLS[attempt], function(err, json) {
+    if (err || !json || !json.data || !json.data.stations) {
+      // Fall back to the next address before giving up.
+      if (attempt + 1 < BIKE_STATUS_URLS.length) {
+        console.log('Bluebikes feed ' + (attempt + 1) + ' failed, trying the next');
+        return fetchBikes(ids, callback, attempt + 1);
+      }
+      return callback(err || new Error('Unexpected dock feed'));
+    }
     var wanted = {};
     ids.forEach(function(id) { if (id) wanted[id] = null; });
     json.data.stations.forEach(function(station) {
@@ -560,7 +802,7 @@ function refreshBikes() {
 }
 
 // Must match TO_SIZE - 1 in src/c/watchface.c.
-var TO_MAX_CHARS = 11;
+var TO_MAX_CHARS = 16;
 var DEST_SHORT = [
   ['North Station', 'N Station'], ['South Station', 'S Station'], ['Government', 'Govt'],
   [' Street', ' St'], [' Square', ' Sq'], [' Center', ' Ctr'], [' Junction', ' Jct'],
@@ -572,6 +814,222 @@ function shortDest(headsign) {
   var s = String(headsign || '').split('/')[0].split(' via ')[0];
   DEST_SHORT.forEach(function(pair) { s = s.replace(pair[0], pair[1]); });
   return s.replace(/\|/g, ' ').slice(0, TO_MAX_CHARS).replace(/\s+$/, '');
+}
+
+// The departure boards start each destination with a badge for its line. The
+// watch draws it from the first character: must match the BADGE_ characters
+// in src/c/watchface.c.
+var BADGE_SUBWAY = '^';   // then one letter: R, O or B
+var BADGE_GREEN = '~';    // then the branch letter (M for the Mattapan Line)
+var BADGE_BUS = '#';      // then the route number and a space
+var BADGE_RAIL = '=';     // commuter rail
+// Bus routes whose number on the street differs from their id.
+var BUS_NAMES = { '741': 'SL1', '742': 'SL2', '743': 'SL3', '751': 'SL4', '749': 'SL5',
+                  '746': 'SLW', '747': 'CT2', '708': 'CT3' };
+
+function lineBadge(routeId, shortName) {
+  routeId = String(routeId || '');
+  if (routeId === 'Red') return BADGE_SUBWAY + 'R';
+  if (routeId === 'Orange') return BADGE_SUBWAY + 'O';
+  if (routeId === 'Blue') return BADGE_SUBWAY + 'B';
+  if (routeId === 'Mattapan') return BADGE_GREEN + 'M';
+  if (routeId.indexOf('Green-') === 0) return BADGE_GREEN + routeId.charAt(6);
+  if (isCommuterRail(routeId)) return BADGE_RAIL;
+  if (!routeId) return '';
+  return BADGE_BUS + String(shortName || BUS_NAMES[routeId] || routeId).slice(0, 3) + ' ';
+}
+
+// A departure's line badge and destination, within the watch's destination column.
+function badgedName(routeId, shortName, headsign) {
+  return (lineBadge(routeId, shortName) + shortDest(headsign)).slice(0, TO_MAX_CHARS)
+    .replace(/\s+$/, '');
+}
+
+// ---- Departure board: nearby ----
+// Must match LAYOUT_NEARBY in src/c/watchface.c and the Layout options in config.js.
+var LAYOUT_NEARBY = 3;
+var NEARBY_DEFAULT_RADIUS_M = 400;
+// The watch asks every minute; a position this recent is reused, so two
+// requests close together ask the phone once.
+var NEARBY_POSITION_MS = 45 * 1000;
+// The list of nearby stops is kept until the phone has moved this far.
+var NEARBY_MOVE_M = 150;
+var METERS_PER_DEGREE = 111000;
+var s_position = null;   // { t, lat, lon }
+var s_nearStops = null;  // { lat, lon, radius, stops: { id: meters away } }
+
+function isNearby(saved) {
+  return parseInt(saved.LAYOUT, 10) === LAYOUT_NEARBY;
+}
+
+function nearbyRadius(saved) {
+  var r = parseInt(saved.RADIUS, 10);
+  return r > 0 ? r : NEARBY_DEFAULT_RADIUS_M;
+}
+
+function metersBetween(lat1, lon1, lat2, lon2) {
+  var rad = Math.PI / 180;
+  var dy = (lat2 - lat1) * METERS_PER_DEGREE;
+  var dx = (lon2 - lon1) * METERS_PER_DEGREE * Math.cos(lat1 * rad);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// How old the last known position is, in seconds, for the watch's location
+// bar; -1 when there is none.
+function positionAge() {
+  return s_position ? Math.round((Date.now() - s_position.t) / 1000) : -1;
+}
+
+// Keeps a new position, tells the watch, and fetches the departures again
+// straight away when the phone has moved away from the stops last listed.
+function keepPosition(err, pos) {
+  if (!pos) return;
+  s_position = { t: Date.now(), lat: pos.coords.latitude, lon: pos.coords.longitude };
+  var age = {};
+  age[keys.NEAR_AGE] = 0;
+  sendToWatch(age, 0, 'position age');
+  var c = s_nearStops;
+  if (c && metersBetween(c.lat, c.lon, s_position.lat, s_position.lon) >= NEARBY_MOVE_M) {
+    // A fetch already under way is using the old position: run another after it.
+    if (s_fetching) s_refetch = true;
+    else refresh();
+  }
+}
+
+// Asks for a newer position when the last one is old enough.
+function pokePosition() {
+  if (!s_position || Date.now() - s_position.t >= NEARBY_POSITION_MS) askLocation(keepPosition);
+}
+
+// The last known position is used straight away, however old, and a newer
+// one is asked for on the side: the departures never wait for the phone's
+// location service unless there is no position at all yet.
+function nearbyPosition(callback) {
+  if (s_position) {
+    pokePosition();
+    return callback(null, s_position);
+  }
+  askLocation(function(err, pos) {
+    if (pos) s_position = { t: Date.now(), lat: pos.coords.latitude, lon: pos.coords.longitude };
+    if (s_position) callback(null, s_position);
+    else callback(new Error('Location: ' + (err ? err.message : 'none')));
+  });
+}
+
+// Calls back with the stops within radius metres, as { stop id: metres away }.
+function nearbyStops(pos, radius, callback) {
+  var c = s_nearStops;
+  if (c && c.radius === radius && metersBetween(c.lat, c.lon, pos.lat, pos.lon) < NEARBY_MOVE_M) {
+    return callback(null, c.stops);
+  }
+  apiGet('/stops', {
+    'filter[latitude]': pos.lat.toFixed(5),
+    'filter[longitude]': pos.lon.toFixed(5),
+    // The API measures in degrees and its circle is not exact, so ask a
+    // little wide and measure properly below.
+    'filter[radius]': (radius * 1.5 / METERS_PER_DEGREE).toFixed(5),
+    'filter[route_type]': '0,1,2,3',
+    'sort': 'distance',
+    'page[limit]': 60,
+    'fields[stop]': 'latitude,longitude'
+  }, function(err, json) {
+    if (err) return callback(err);
+    var stops = {};
+    json.data.forEach(function(stop) {
+      var a = stop.attributes;
+      var m = metersBetween(pos.lat, pos.lon, a.latitude, a.longitude);
+      if (m <= radius) stops[stop.id] = m;
+    });
+    s_nearStops = { lat: pos.lat, lon: pos.lon, radius: radius, stops: stops };
+    callback(null, stops);
+  });
+}
+
+function nearbyName(routeId, route, headsign) {
+  return badgedName(routeId, route ? route.short_name : '', headsign);
+}
+
+// Calls back with the next departures from every stop within radius metres,
+// spread over the watch's three rows (the board merges them back by time),
+// and the text for the board's column bar.
+function fetchNearby(radius, callback) {
+  var label = radius + 'm';
+  var empty = [];
+  for (var r = 0; r < NUM_ROWS; r++) empty.push({ mode: MODE_MINUTES, trains: [] });
+  nearbyPosition(function(err, pos) {
+    if (err) return callback(err, null, 'NO FIX');
+    nearbyStops(pos, radius, function(err2, stops) {
+      if (err2) return callback(err2, null, label);
+      var ids = Object.keys(stops);
+      if (ids.length === 0) return callback(null, empty, label);
+      var nowMs = Date.now();
+      var nowSec = Math.floor(nowMs / 1000);
+      var windows = serviceWindows(nowMs, 0);
+      var best = {};
+      var pendingWindows = windows.length;
+      var failure = null;
+      windows.forEach(function(win) {
+        apiGet('/schedules', {
+          'filter[stop]': ids.join(','),
+          'filter[date]': win.date,
+          'filter[min_time]': win.minTime,
+          'include': 'prediction,trip,route',
+          'sort': 'departure_time',
+          'page[limit]': 80,
+          'fields[schedule]': 'departure_time',
+          'fields[prediction]': 'departure_time,schedule_relationship',
+          'fields[trip]': 'headsign',
+          'fields[route]': 'short_name,type'
+        }, function(err3, json) {
+          if (err3) {
+            failure = err3;
+          } else {
+            var included = indexIncluded(json);
+            json.data.forEach(function(sched) {
+              var rel = sched.relationships || {};
+              var routeId = rel.route && rel.route.data ? rel.route.data.id : '';
+              var route = included['route:' + routeId];
+              var trip = rel.trip && rel.trip.data ? included['trip:' + rel.trip.data.id] : null;
+              var pred = rel.prediction && rel.prediction.data
+                ? included['prediction:' + rel.prediction.data.id] : null;
+              var p = pred ? pred.attributes : null;
+              // No departure time means the train or bus ends its run here.
+              if (!sched.attributes.departure_time) return;
+              var scheduled = parseIso(sched.attributes.departure_time);
+              var predicted = p ? parseIso(p.departure_time) : 0;
+              var cancelled = isCancelled(p);
+              var rail = isCommuterRail(routeId);
+              // As on the saved stations: only commuter rail keeps a canceled
+              // train on the board or marks a late one.
+              if (cancelled && !rail) return;
+              var t = cancelled ? scheduled : (predicted || scheduled);
+              if (t <= nowSec) return;
+              var flag = !rail ? FLAG_NONE : cancelled ? FLAG_CANCELLED
+                       : predicted && predicted - scheduled >= DELAY_SEC ? FLAG_DELAYED : FLAG_NONE;
+              var stopId = rel.stop && rel.stop.data ? rel.stop.data.id : '';
+              var away = stops[stopId] === undefined ? radius : stops[stopId];
+              var tripId = trip ? rel.trip.data.id : stopId + '@' + t;
+              // A trip that calls at several nearby stops is listed once, at the closest.
+              if (best[tripId] && best[tripId].away <= away) return;
+              best[tripId] = { time: t, dest: NO_BRANCH, flag: flag, away: away,
+                               to: nearbyName(routeId, route ? route.attributes : null,
+                                              trip ? trip.attributes.headsign : '') };
+            });
+          }
+          if (--pendingWindows > 0) return;
+          var trains = Object.keys(best).map(function(k) { return best[k]; });
+          if (failure && trains.length === 0) return callback(failure, null, label);
+          trains.sort(function(x, y) { return x.time - y.time; });
+          var result = [];
+          for (var row = 0; row < NUM_ROWS; row++) {
+            result.push({ mode: MODE_MINUTES,
+                          trains: trains.slice(row * MAX_TIMES, (row + 1) * MAX_TIMES) });
+          }
+          callback(null, result, label);
+        });
+      });
+    });
+  });
 }
 
 function putRow(dict, row, result) {
@@ -649,12 +1107,16 @@ function refresh() {
   var fetchId = ++s_fetch_id;
 
   var saved = savedSettings();
+  // The location test runs on the side; the nearby board asks for itself.
+  if (!isNearby(saved)) testLocation();
   var dict = {};
   var rows = [];
-  var pending = NUM_ROWS;
+  var nearby = isNearby(saved);
+  // The nearby board is one lookup in place of the three saved stations.
+  var pending = nearby ? 1 : NUM_ROWS;
   for (var i = 0; i < NUM_ROWS; i++) {
     rows.push(rowConfig(i, saved));
-    if (rows[i].alerts && rows[i].set) pending++;
+    if (!nearby && rows[i].alerts && rows[i].set) pending++;
   }
   var bikeIds = bikeStations(saved);
   if (hasBikes(bikeIds)) pending++;
@@ -684,6 +1146,25 @@ function refresh() {
     });
   } else {
     dict[keys.BIKES] = new Array(NUM_BIKES + 1).join(BIKE_NONE + '0');
+  }
+
+  if (nearby) {
+    fetchNearby(nearbyRadius(saved), function(err, result, label) {
+      if (fetchId !== s_fetch_id) return;
+      dict[keys.NEAR] = label;
+      dict[keys.NEAR_AGE] = positionAge();
+      if (err) {
+        console.log('Nearby fetch failed: ' + err.message);
+        failed++;
+      } else {
+        for (var row = 0; row < NUM_ROWS; row++) {
+          dict[keys.ALERT + row] = '';
+          putRow(dict, row, result[row]);
+        }
+      }
+      done();
+    });
+    return;
   }
 
   for (var r = 0; r < NUM_ROWS; r++) {
@@ -729,7 +1210,8 @@ function refresh() {
 
 Pebble.addEventListener('showConfiguration', function() {
   // Rebuilt each time so the page includes the saved stations as fallback options.
-  clay = new Clay(config.build(savedSettings()), configPage, { autoHandleEvents: false });
+  clay = new Clay(config.build(savedSettings(), usageLines(), locationLines()), configPage,
+                  { autoHandleEvents: false });
   Pebble.openURL(clay.generateUrl());
 });
 
@@ -755,6 +1237,8 @@ Pebble.addEventListener('webviewclosed', function(e) {
   for (var slot = 0; slot < NUM_BIKES; slot++) {
     delete settings[keys.BIKE + slot];
   }
+  // The radius is only used on the phone; the watch is told it with the departures.
+  delete settings[keys.RADIUS];
   sendToWatch(settings, 3, 'settings');
   if (Object.keys(cleared).length > 0) {
     sendToWatch(cleared, 3, 'cleared rows');
@@ -792,6 +1276,9 @@ function recordDiag(text) {
 
 function logDiagHistory() {
   var history = diagHistory();
+  usageLines(true).forEach(function(line) { console.log('USAGE ' + line); });
+  // The position itself stays out of the logs.
+  locationLines().forEach(function(line) { console.log('LOCATION ' + line.replace(/ Near .*$/, '')); });
   console.log('DIAG HISTORY ' + history.length + ' entries');
   history.forEach(function(entry) {
     console.log('DIAG ' + entry.t + ' ' + entry.d);
@@ -803,8 +1290,10 @@ Pebble.addEventListener('appmessage', function(e) {
   if (payload.DIAG) {
     recordDiag(payload.DIAG);
   }
-  if (payload.REQUEST === REQUEST_BIKES) {
-    refreshBikes();
+  if (payload.REQUEST === REQUEST_BIKES || payload.REQUEST === REQUEST_POSITION) {
+    // The nearby board follows the phone's position every minute.
+    if (isNearby(savedSettings())) pokePosition();
+    if (payload.REQUEST === REQUEST_BIKES) refreshBikes();
   } else if (payload.REQUEST || !payload.DIAG) {
     refresh();
   }
@@ -815,7 +1304,9 @@ if (typeof module !== 'undefined') {
   module.exports = {
     serviceWindows: serviceWindows, bostonOffsetHours: bostonOffsetHours,
     alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
-    tagBusDestinations: tagBusDestinations,
+    tagBusDestinations: tagBusDestinations, noteUsage: noteUsage, usageLines: usageLines,
+    testLocation: testLocation, locationLines: locationLines, nearbyName: nearbyName, badgedName: badgedName,
+    metersBetween: metersBetween,
     shortDest: shortDest
   };
 }

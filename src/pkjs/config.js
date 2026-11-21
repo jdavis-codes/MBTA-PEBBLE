@@ -39,7 +39,7 @@ function rowSection(row, i, saved) {
   return {
     type: 'section',
     items: [
-      { type: 'heading', defaultValue: 'Station ' + (i + 1) },
+      { type: 'heading', id: 'station-' + i, defaultValue: 'Station ' + (i + 1) },
       {
         type: 'select',
         messageKey: 'ROUTE[' + i + ']',
@@ -164,8 +164,12 @@ function bikeSection(saved) {
 }
 
 // saved: the flat settings Clay keeps in localStorage ('clay-settings').
-function buildConfig(saved) {
+// usage: lines describing how much data has been downloaded, from index.js.
+// location: lines from the location test, also from index.js.
+function buildConfig(saved, usage, location) {
   saved = saved || {};
+  usage = usage || [];
+  location = location || [];
   return [
     { type: 'heading', defaultValue: 'MBTA Pebble' },
     {
@@ -180,15 +184,52 @@ function buildConfig(saved) {
           options: [
             { label: 'Line by line', value: '0' },
             { label: 'Departure board', value: '1' },
-            { label: 'Hour dial', value: '2' }
+            { label: 'Hour dial', value: '2' },
+            { label: 'Departure board: nearby', value: '3' }
+          ]
+        },
+        {
+          type: 'slider',
+          messageKey: 'RADIUS',
+          label: 'Nearby radius (meters)',
+          description: 'The board lists every train and bus leaving from stops ' +
+                       'within this distance of your phone, in place of your saved ' +
+                       'stations. The watch shows the radius above the list. Your ' +
+                       'phone\'s position is sent to the MBTA to find the stops.',
+          defaultValue: 400,
+          min: 100,
+          max: 1000,
+          step: 100
+        },
+        {
+          type: 'slider',
+          messageKey: 'BOARD_ROWS',
+          label: 'Departures shown on the board',
+          description: 'With 7 or 8 departures the lines get shorter and the times ' +
+                       'smaller, which also leaves more room for the destination.',
+          defaultValue: 6,
+          min: 6,
+          max: 8,
+          step: 1
+        },
+        {
+          type: 'select',
+          messageKey: 'BOARD_SHOW',
+          label: 'Show each departure as',
+          description: 'Showing only one of the two leaves more room for the ' +
+                       'destination.',
+          defaultValue: '0',
+          options: [
+            { label: 'Time and minutes', value: '0' },
+            { label: 'Minutes only', value: '1' },
+            { label: 'Time only', value: '2' }
           ]
         },
         {
           type: 'slider',
           messageKey: 'DEPARTURES',
           label: 'Trains shown per station',
-          description: 'Line by line layout only. With 4 or 5 trains the text gets ' +
-                       'smaller to fit.',
+          description: 'With 4 or 5 trains the text gets smaller to fit.',
           defaultValue: 3,
           min: 1,
           max: 5,
@@ -196,12 +237,33 @@ function buildConfig(saved) {
         }
       ]
     },
-    { type: 'heading', size: 4, defaultValue: 'Choose up to 3 stations or bus stops to watch' },
+    { type: 'heading', id: 'stations-heading', size: 4,
+      defaultValue: 'Choose up to 3 stations or bus stops to watch' },
     { type: 'text', id: 'mbta-status', defaultValue: 'Loading MBTA lines…' }
   ].concat(ROWS.map(function(row, i) {
     return rowSection(row, i, saved);
   })).concat([
     bikeSection(saved),
+    {
+      type: 'section',
+      items: [
+        { type: 'heading', defaultValue: 'Data usage' },
+        {
+          type: 'text',
+          defaultValue: usage.join('<br>')
+        }
+      ]
+    },
+    {
+      type: 'section',
+      items: [
+        { type: 'heading', defaultValue: 'Location test' },
+        {
+          type: 'text',
+          defaultValue: location.join('<br>')
+        }
+      ]
+    },
     { type: 'submit', defaultValue: 'Save' }
   ]);
 }

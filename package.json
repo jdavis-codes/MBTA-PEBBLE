@@ -1,7 +1,7 @@
 {
   "name": "watchface",
   "author": "MakeAwesomeHappen",
-  "version": "0.4.3",
+  "version": "0.4.14",
   "keywords": [
     "pebble-app"
   ],
@@ -22,7 +22,8 @@
       "watchface": true
     },
     "capabilities": [
-      "configurable"
+      "configurable",
+      "location"
     ],
     "messageKeys": [
       "REQUEST",
@@ -46,7 +47,12 @@
       "BIKES",
       "BIKE_FAILED",
       "LAYOUT",
-      "TO[3]"
+      "TO[3]",
+      "NEAR",
+      "RADIUS",
+      "BOARD_ROWS",
+      "BOARD_SHOW",
+      "NEAR_AGE"
     ],
     "resources": {
       "media": []
@@ -57,7 +63,8 @@
         "parameters": {
           "domains": [
             "api-v3.mbta.com",
-            "gbfs.lyft.com"
+            "gbfs.lyft.com",
+            "gbfs.bluebikes.com"
           ]
         }
       }

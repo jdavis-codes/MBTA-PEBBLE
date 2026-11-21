@@ -26,7 +26,7 @@ Commuter rail times are scheduled times, replaced by live predictions when the M
 
 ### Layouts
 
-The watchface settings offer three layouts.
+The watchface settings offer four layouts.
 
 - **Line by line**: The layout in the guide above. It shows one row per station, focusing on verbose schedule info.
 - **Departure board**: This layout shows every upcoming train from all three stations in one list, soonest first, with its destination and the minutes until it leaves.
@@ -56,6 +56,27 @@ The watchface settings offer three layouts.
 
 Both screens use demo data so that every marker appears at once.
 
+- **Departure board: nearby**: the departure board, but listing every train
+  and bus leaving from stops within a set distance of your phone, in place of
+  your saved stations. The column bar shows the radius, for example `400m`, where the
+  ordinary board says `TO`, or `NO FIX` when the phone can't give a position.
+  The radius is set in the watchface settings, from 100 to 1000 meters. Your
+  phone's position is sent to the MBTA to find the stops; the phone is asked
+  for it every minute, and only while this layout is chosen. The slashes cut
+  into the column bar show how fresh the position is: four slashes when the
+  phone has just answered, and one disappears every 15 seconds. If you have
+  moved more than 150 meters, the list is fetched again straight away. An
+  empty gap means the phone has not answered for a minute.
+  Departure warnings and service alerts don't apply to this layout.
+
+Both departure boards start each destination with a badge for its line,
+because the screen has no color to tell the lines apart.
+
+- Filled disc with a letter: the Red Line (`R`), Orange Line (`O`) or Blue Line (`B`).
+- Ring with a letter: a Green Line branch (`B`, `C`, `D` or `E`), or the Mattapan Line (`M`).
+- Box with a number: a bus, with its route number (for example `66` or `SL5`).
+- Solid block marked `CR`: commuter rail.
+
 Service alerts only scroll in the line by line layout. The departure board marks a
 train with `!` when its row has an alert; the hour dial does not show alerts.
 If the watch restarts within ten minutes of switching to one of the newer
@@ -63,8 +84,13 @@ layouts, it goes back to line by line by itself.
 
 ### Bluebikes docks
 
-Up to nine [Bluebikes](https://bluebikes.com/system-data) docks can be shown. since often bluebike docks are clustered in high traffic areas like north station, I've layed out the indicators as groups of 3. Dock status comes from the Bluebikes GBFS feed and refreshes every minute; the feed has no per-station query, so each refresh downloads the whole system's status (about
-235 KB).
+Up to nine [Bluebikes](https://bluebikes.com/system-data) docks can be shown. since often bluebike docks are clustered in high traffic areas like north station, I've layed out the indicators as groups of 3. Dock status comes from the Bluebikes GBFS feed and refreshes every minute. The
+feed has no per-station query, so each refresh downloads the whole system's
+status. The watchface asks Bluebikes' own address for it first, which
+compresses the download to about 18 KB; if that fails it falls back to the
+published Lyft address, which sends the same data as about 234 KB. The
+**Data usage** section at the bottom of the watchface settings shows how much
+has been downloaded today and yesterday.
 
 ![Every Bluebikes dock indicator, enlarged](docs/guide-bikes.png)
 
@@ -93,6 +119,10 @@ in `src/pkjs/config.js`). You can access it from the Pebble app by clicking on t
 #### Settings options
 
 - **Layout**: changes watchface layout when saved to selected option
+- The settings page only shows the options that the chosen layout uses. Options that are hidden keep their values.
+- **Nearby radius** | ***Departure board: nearby only:*** how far from your phone the board looks for stops (100 to 1000 meters, default 400).
+- **Departures shown on the board** | ***Both departure boards:*** (6–8, default 6). With 7 or 8 the lines get shorter and the times smaller, which also leaves more room for the destination.
+- **Show each departure as** | ***Both departure boards:*** time and minutes, minutes only, or time only. Showing only one of the two leaves more room for the destination.
 - **Trains shown per station** | ***Line by Line layout only:*** (1–5, default 3). When displaying 4 or 5 the text shrinks to fit and the clock gets the freed-up space.
 - **Line → Direction → Station** Configure watched Stations. Leave any at None if you want fewer than three. The page loads these lists live from the MBTA API (`src/pkjs/config-page.js`): picking a line fills in its directions and stations.
 - **Buses** are at the end of the Line list, by route number. For a bus the third picker is called **Stop**, and its list changes with the direction, because a bus stops on opposite sides of the street in each direction. The watch shows the buses the MBTA is predicting, which reaches about an hour ahead, so a route that runs rarely can show one bus or none.

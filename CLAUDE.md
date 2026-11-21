@@ -4,17 +4,15 @@ alwaysApply: true
 
 ## Project Overview
 
-This is a Pebble smartwatch application written in C using the Pebble SDK.
+MBTA Pebble is a black and white Pebble watchface: the time, live MBTA departures
+for up to three stations or bus stops, and Bluebikes dock status. The watch side is
+C (`src/c/watchface.c`); the phone side is PebbleKit JS (`src/pkjs/`), which does all
+the network requests and sends the watch small messages.
 
 ## Supported Platforms
 
-The app targets multiple Pebble watch models:
-- aplite (Pebble classic)
-- basalt (Pebble Time)
-- chalk (Pebble Time Round)
-- diorite (Pebble 2)
-- emery (Pebble Time 2)
-- flint (Pebble 2 Duo)
+`targetPlatforms` in `package.json` is diorite (Pebble 2) and flint (Pebble 2 Duo).
+Both are 144 by 168 pixels, black and white. The owner's watch is a flint.
 
 ## Commands
 
@@ -49,22 +47,70 @@ The `--vnc` flag enables a VNC-based display backend that doesn't require X11.
 ## Project Structure
 
 ```
-src/c/           - C source files for the watchapp
-src/pkjs/        - PebbleKitJS files (currently empty)
-worker_src/c/    - Worker source files (optional, not present)
-resources/       - Images, fonts, and other resources (not present)
+src/c/watchface.c       - the whole watch side: one canvas layer, four layouts
+src/pkjs/index.js       - phone side: MBTA and Bluebikes requests, location, messages to the watch
+src/pkjs/config.js      - the settings page definition (Clay)
+src/pkjs/config-page.js - script that runs inside the settings page (live lists, show and hide)
+tests/                  - phone-side tests (`make test`)
+scripts/                - setup, log capture, emulator helpers
+docs/                   - guide and banner sources (HTML) and their rendered images
 ```
-## Configuration
 
-By default, this project is initialized as a watchface. To make it an app, replace "watchface": true with "watchface": false in package.json.
+`make` lists the shortcuts. The ones used most:
+
+```bash
+make emu                 # build and run in the emulator
+make emu-test LAYOUT=3 ROWS=7 SHOW=1   # emulator with a forced layout and a test position
+make dump                # save the emulator screen to build/screen.png
+make test                # phone-side tests; TESTS=all also drives the settings page in Chromium
+make bump                # raise the patch version
+make watch-retry         # install on the real watch, retrying for 30 minutes
+```
 
 ## Architecture
 
-The application follows the standard Pebble app architecture:
+- **Watch:** a single canvas layer draws everything. `s_settings.layout` picks the
+  layout: line by line (0), departure board (1), hour dial (2), departure board:
+  nearby (3). The watch asks the phone for data (`REQUEST`) every two minutes, and
+  for docks or the phone's position in the minutes between.
+- **Phone:** `refresh()` fetches every row and the docks and sends one message.
+  Anything optional (alerts, location) must never hold that message up.
+- **Settings:** Clay keeps them on the phone. Only what the watch draws with is
+  sent to it; stations, docks and the radius stay on the phone.
+- The same constant often lives on both sides (layout numbers, badge characters,
+  string sizes). Each is marked "Must match ..." in a comment: change both.
 
-1. **Main Entry Point**: `src/c` - The `main()` function initializes the app and starts the event loop
-2. **Window Management**: Single window app with text layer for displaying button press feedback
-3. **Event Handling**: Button click handlers registered via `prv_click_config_provider` for UP, DOWN, and SELECT buttons
+## Things that have bitten us
+
+- **Storage:** a persist key holds at most 256 bytes. `Settings` only grows at the
+  end; give a new field a default and check its range after loading, because an
+  older, shorter saved copy leaves it untouched.
+- **Messages:** add message keys at the end of the list in `package.json`. The
+  watch's inbox is 1500 bytes; three full alerts already use a third of it.
+- **The iPhone runs the phone side in the background.** Timers are suspended and a
+  request can go unanswered forever. Anything that waits needs a give-up time that
+  is checked against the clock on the next request, not only a timer.
+- **System fonts are not centered.** Letters carry uneven side spacing, so text in
+  a small shape looks off. The round line badges draw their letters from pixel
+  shapes for that reason.
+- **Live data in the emulator needs the real time.** Setting the emulator clock
+  makes every live departure look past. Set it only with demo data.
+- **`pebble install` does not rebuild.** Use `make emu` or `make watch`.
+- **The emulator has no location and no settings session.** `make emu-test` patches
+  the phone side for one run and restores it; a patched file contains the word
+  `EMUTEST` and must never be committed.
+
+## Working with the owner
+
+- For a visual change, draw a mockup first (Pillow, in the scratchpad), then show
+  an emulator capture, then install. Offer two or three variants and say which one
+  you would pick.
+- Say what was not tested as plainly as what was: emulator only, a path that
+  could not run, a state that never came up.
+- A push needs the word. Praise for a build is not a go-ahead to push.
+- The owner's own stations and position stay out of the code, tests, docs and logs.
+  Use example stations (Park Street, South Station, route 66).
+- Tags cannot be pushed from a cloud session: create them locally and say so.
 
 ## SDK Documentation
 
@@ -117,7 +163,8 @@ Write the README, the watch guides (`docs/watch-guide.html`, rendered to `docs/w
 
 ## Development Best Practices
 
-- Before every commit, install the build on the user's real watch: start `make watch` in the background (it waits up to 5 minutes for the phone), tell the user in the same turn to open the Pebble app on their phone, and commit only after `App install succeeded.` Do not ask whether the app is open and wait for a reply. See the `pebble-vm-dev` skill.
+- Run `make test` before installing a change to the phone side.
+- Before every commit, install the build on the user's real watch: start `make watch-retry` in the background (it keeps trying for 30 minutes while the phone connects), tell the user in the same turn to open the Pebble app on their phone, and commit only after `App install succeeded.` Do not ask whether the app is open and wait for a reply. See the `pebble-vm-dev` skill.
 - Do not `git push` a change until it has been installed on the watch and the user has confirmed it looks right there. Commit locally after the install succeeds, then wait for the user's confirmation before pushing. If they ask for adjustments, make them, reinstall, and wait again.
 - Changes that do not affect the build (documentation, `CLAUDE.md`, skills, the Makefile) have nothing to install or confirm, so commit and push them directly.
 

@@ -1,0 +1,21 @@
+const Module = require('module'); const path = require('path'); const assert = require('assert');
+const orig = Module._load;
+Module._load = function(req, ...r) {
+  if (req === '@rebble/clay') return function(){};
+  if (req === 'message_keys') return {};
+  if (req === './config-page') return function(){};
+  return orig.call(this, req, ...r);
+};
+global.localStorage = { getItem: () => null }; global.Pebble = { addEventListener(){} };
+const m = require(path.join((process.argv[2] || require('path').join(__dirname, '..')), 'src/pkjs/index.js'));
+const row = { route: 'CR-Worcester', stop: 'place-sstat', direction: '0' };
+const al = ents => ({ attributes: { informed_entity: ents } });
+assert(m.alertApplies(al([{ route: 'CR-Worcester' }]), row), 'line-wide');
+assert(m.alertApplies(al([{ route: 'CR-Worcester', stop: 'place-sstat', direction_id: 0 }]), row));
+assert(m.alertApplies(al([{ route: 'CR-Worcester', stop: 'place-sstat', direction_id: null }]), row));
+assert(!m.alertApplies(al([{ route: 'CR-Franklin', stop: 'place-sstat', direction_id: 1 }]), row), 'other line');
+assert(!m.alertApplies(al([{ route: 'CR-Worcester', stop: 'place-sstat', direction_id: 1 }]), row), 'other direction');
+assert(!m.alertApplies(al([{ route: 'CR-Worcester', stop: 'place-ER-0168' }]), row), 'other station');
+assert.equal(m.alertText('Saint Mary’s  St – closed\n'), "Saint Mary's St - closed");
+const long = m.alertText('x'.repeat(300)); assert.equal(long.length, 160); assert(long.endsWith('...'));
+console.log('alerts OK');
