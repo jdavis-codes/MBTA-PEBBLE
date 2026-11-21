@@ -1,6 +1,26 @@
 # Location logging toolkit: spec
 
-Status: proposed, not built. Written at version 0.4.14.
+Status: step 1 of "Order of work" is built in version 0.5.0 (`src/pkjs/loclog.js`),
+with the trace export from step 3 so that the first commuting days are kept in
+full. The test plan is in `docs/location-test-plan.md`. Written at version 0.4.14.
+
+Where 0.5.0 differs from the text below:
+
+- While the log is on, the marker buttons are at the top of the settings page,
+  not in the section at the bottom, because they are pressed on a platform.
+- The random origin lives only in memory, so every restart of the phone side
+  starts a new one. Each record carries a segment number (`seg`); positions
+  can only be compared inside one segment.
+- The trace is shown once: choose how much under "Show the trace", save, and
+  open the settings again. The page carries the trace in its address, and how
+  long an address the Pebble iPhone app accepts is not known.
+- `stop` is the MBTA's stop number, not its name, and it and `stops` are only
+  filled on the nearby board.
+- A marker describes where the owner is for at most two hours ("Back at street
+  level" for 20 minutes), so a forgotten marker does not count a day at a desk.
+- While the log is on, the phone is asked for its position every time the
+  watch asks for anything, on every layout. On the nearby board that is once a
+  minute, as before.
 
 ## Why we are doing this
 
