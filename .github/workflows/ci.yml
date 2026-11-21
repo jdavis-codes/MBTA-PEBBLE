@@ -11,6 +11,9 @@ permissions:
 
 jobs:
   build:
+    # A branch in this repository is already built by its push, so the pull
+    # request run is only for pull requests from forks.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
