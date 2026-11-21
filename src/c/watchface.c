@@ -105,6 +105,8 @@ typedef struct {
 // What the REQUEST message asks the phone for; must match src/pkjs/index.js.
 #define REQUEST_ALL 1
 #define REQUEST_BIKES 2
+// Only asks the phone where it is, for the nearby board.
+#define REQUEST_POSITION 3
 
 // One section per departure row (header + times); must match ROWS in src/pkjs/config.js.
 #define NUM_SECTIONS 3
@@ -265,6 +267,16 @@ static char s_bikes[2 * NUM_BIKES + 1] = "-0-0-0-0-0-0-0-0-0";
 static char s_to[NUM_SECTIONS][NUM_TIMES][TO_SIZE];
 // The nearby board's radius ("400m"), or why it has nothing to show.
 static char s_near[NEAR_SIZE];
+// The nearby board's location bar: four slashes in the column bar, one gone
+// for every FIX_SLASH_SEC since the phone last gave its position.
+#define FIX_SLASHES 4
+#define FIX_SLASH_SEC 15
+#define FIX_SLASH_W 6
+#define FIX_SLASH_GAP 2
+#define FIX_BAR_X 72
+// When the phone last gave its position, or 0 when it has not.
+static time_t s_fix_time;
+static AppTimer *s_fix_timer;
 static Diag s_diag;
 // The previous run's breadcrumb as text, until the phone has received it.
 static char s_prev_diag[120];
@@ -1356,6 +1368,36 @@ static void prv_draw_board_text(GContext *ctx, const BoardRow *row, int y, int w
   }
 }
 
+// How many slashes of the location bar are left.
+static int prv_fix_slashes(void) {
+  if (!s_fix_time) {
+    return 0;
+  }
+  int32_t age = (int32_t)(time(NULL) - s_fix_time);
+  int left = FIX_SLASHES - (age < 0 ? 0 : age) / FIX_SLASH_SEC;
+  return left < 0 ? 0 : left;
+}
+
+// Cuts the location bar out of the column bar: a gap whose two ends lean like
+// the slashes left inside it.
+static void prv_draw_fix_bar(GContext *ctx) {
+  int left = prv_fix_slashes();
+  int pitch = FIX_SLASH_W + FIX_SLASH_GAP;
+  int gap_w = FIX_SLASH_GAP + FIX_SLASHES * pitch;
+  graphics_context_set_stroke_width(ctx, 1);
+  for (int k = 0; k < BOARD_BAR_H; k++) {
+    int x = FIX_BAR_X + k;
+    int y = BOARD_TOP + k;
+    graphics_context_set_stroke_color(ctx, GColorBlack);
+    graphics_draw_line(ctx, GPoint(x, y), GPoint(x + gap_w - 1, y));
+    graphics_context_set_stroke_color(ctx, GColorWhite);
+    for (int i = 0; i < left; i++) {
+      int sx = x + FIX_SLASH_GAP + i * pitch;
+      graphics_draw_line(ctx, GPoint(sx, y), GPoint(sx + FIX_SLASH_W - 1, y));
+    }
+  }
+}
+
 // The strip shared by the newer layouts' top edge: clock, docks, status dots.
 static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
   int width = bounds.size.w;
@@ -1377,9 +1419,16 @@ static void prv_draw_board(GContext *ctx, GRect bounds, int64_t now_ms) {
   // "TIME" is wider than the times beneath it in the smaller font.
   int to_x = prv_board_to_x();
   bar.origin.x = to_x > 3 && to_x < BOARD_TO_X ? BOARD_TO_X - 6 : to_x;
-  // The nearby board says how far it is looking in place of "TO".
+  // The nearby board says how far it is looking in place of "TO", and keeps
+  // it to the left of the location bar.
   bool nearby = s_settings.layout == LAYOUT_NEARBY;
+  if (nearby && to_x > 3) {
+    bar.origin.x = 35;
+  }
   prv_draw_text(ctx, nearby && s_near[0] ? s_near : "TO", s_header_font, bar, GTextAlignmentLeft);
+  if (nearby) {
+    prv_draw_fix_bar(ctx);
+  }
 
   int rows_top = BOARD_TOP + BOARD_BAR_H;
   if (s_board_count == 0) {
@@ -1872,6 +1921,28 @@ static void prv_send_prev_diag(void) {
   app_message_outbox_send();
 }
 
+// Redraws the nearby board each time a slash of the location bar runs out.
+static void prv_schedule_fix_timer(void);
+
+static void prv_fix_timer_cb(void *context) {
+  s_fix_timer = NULL;
+  layer_mark_dirty(s_canvas);
+  prv_schedule_fix_timer();
+}
+
+static void prv_schedule_fix_timer(void) {
+  if (s_fix_timer) {
+    app_timer_cancel(s_fix_timer);
+    s_fix_timer = NULL;
+  }
+  if (s_settings.layout != LAYOUT_NEARBY || prv_fix_slashes() == 0) {
+    return;
+  }
+  int32_t age = (int32_t)(time(NULL) - s_fix_time);
+  int32_t wait = FIX_SLASH_SEC - (age < 0 ? 0 : age) % FIX_SLASH_SEC;
+  s_fix_timer = app_timer_register((uint32_t)wait * 1000, prv_fix_timer_cb, NULL);
+}
+
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   bool changed = false;
   bool alert_changed = false;
@@ -1971,6 +2042,15 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     layer_mark_dirty(s_canvas);
   }
 
+  // How many seconds ago the phone last learned where it is.
+  Tuple *fix = dict_find(iter, MESSAGE_KEY_NEAR_AGE);
+  if (fix) {
+    int32_t age = prv_tuple_int(fix);
+    s_fix_time = age < 0 ? 0 : time(NULL) - age;
+    prv_schedule_fix_timer();
+    layer_mark_dirty(s_canvas);
+  }
+
   Tuple *bikes = dict_find(iter, MESSAGE_KEY_BIKES);
   if (bikes && bikes->type == TUPLE_CSTRING &&
       strlen(bikes->value->cstring) == 2 * NUM_BIKES &&
@@ -1996,6 +2076,9 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if (changed || settings_changed || alert_changed || to_changed) {
     prv_content_changed();
     prv_update_blink();
+  }
+  if (settings_changed) {
+    prv_schedule_fix_timer();
   }
   if (alert_changed) {
     // A changed alert restarts the pass from the beginning.
@@ -2028,6 +2111,10 @@ static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
     } else if (prv_has_bikes()) {
       s_last_request = now;
       prv_request_update(REQUEST_BIKES);
+    } else if (s_settings.layout == LAYOUT_NEARBY) {
+      // The nearby board follows the phone's position every minute.
+      s_last_request = now;
+      prv_request_update(REQUEST_POSITION);
     }
   }
 }
@@ -2136,6 +2223,9 @@ static void prv_deinit(void) {
   }
   if (s_scroll_timer) {
     app_timer_cancel(s_scroll_timer);
+  }
+  if (s_fix_timer) {
+    app_timer_cancel(s_fix_timer);
   }
   tick_timer_service_unsubscribe();
   connection_service_unsubscribe();

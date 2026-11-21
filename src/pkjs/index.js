@@ -59,6 +59,7 @@ var BIKE_FULL = BIKE_LEVELS + 2;
 var BIKE_MAX_EBIKES = 8;
 // What the watch's REQUEST message asks for; must match src/c/watchface.c.
 var REQUEST_BIKES = 2;
+var REQUEST_POSITION = 3;
 
 // A fetch still unfinished after this long is treated as hung and abandoned.
 // The iOS Pebble app has no XMLHttpRequest timeout and suspends timers in the
@@ -848,8 +849,9 @@ function badgedName(routeId, shortName, headsign) {
 // Must match LAYOUT_NEARBY in src/c/watchface.c and the Layout options in config.js.
 var LAYOUT_NEARBY = 3;
 var NEARBY_DEFAULT_RADIUS_M = 400;
-// A position this recent is reused, so the phone is asked at most this often.
-var NEARBY_POSITION_MS = 5 * 60 * 1000;
+// The watch asks every minute; a position this recent is reused, so two
+// requests close together ask the phone once.
+var NEARBY_POSITION_MS = 45 * 1000;
 // The list of nearby stops is kept until the phone has moved this far.
 var NEARBY_MOVE_M = 150;
 var METERS_PER_DEGREE = 111000;
@@ -872,19 +874,43 @@ function metersBetween(lat1, lon1, lat2, lon2) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+// How old the last known position is, in seconds, for the watch's location
+// bar; -1 when there is none.
+function positionAge() {
+  return s_position ? Math.round((Date.now() - s_position.t) / 1000) : -1;
+}
+
+// Keeps a new position, tells the watch, and fetches the departures again
+// straight away when the phone has moved away from the stops last listed.
+function keepPosition(err, pos) {
+  if (!pos) return;
+  s_position = { t: Date.now(), lat: pos.coords.latitude, lon: pos.coords.longitude };
+  var age = {};
+  age[keys.NEAR_AGE] = 0;
+  sendToWatch(age, 0, 'position age');
+  var c = s_nearStops;
+  if (c && metersBetween(c.lat, c.lon, s_position.lat, s_position.lon) >= NEARBY_MOVE_M) {
+    // A fetch already under way is using the old position: run another after it.
+    if (s_fetching) s_refetch = true;
+    else refresh();
+  }
+}
+
+// Asks for a newer position when the last one is old enough.
+function pokePosition() {
+  if (!s_position || Date.now() - s_position.t >= NEARBY_POSITION_MS) askLocation(keepPosition);
+}
+
 // The last known position is used straight away, however old, and a newer
 // one is asked for on the side: the departures never wait for the phone's
 // location service unless there is no position at all yet.
 function nearbyPosition(callback) {
-  function keep(err, pos) {
-    if (pos) s_position = { t: Date.now(), lat: pos.coords.latitude, lon: pos.coords.longitude };
-  }
   if (s_position) {
-    if (Date.now() - s_position.t >= NEARBY_POSITION_MS) askLocation(keep);
+    pokePosition();
     return callback(null, s_position);
   }
   askLocation(function(err, pos) {
-    keep(err, pos);
+    if (pos) s_position = { t: Date.now(), lat: pos.coords.latitude, lon: pos.coords.longitude };
     if (s_position) callback(null, s_position);
     else callback(new Error('Location: ' + (err ? err.message : 'none')));
   });
@@ -1126,6 +1152,7 @@ function refresh() {
     fetchNearby(nearbyRadius(saved), function(err, result, label) {
       if (fetchId !== s_fetch_id) return;
       dict[keys.NEAR] = label;
+      dict[keys.NEAR_AGE] = positionAge();
       if (err) {
         console.log('Nearby fetch failed: ' + err.message);
         failed++;
@@ -1263,8 +1290,10 @@ Pebble.addEventListener('appmessage', function(e) {
   if (payload.DIAG) {
     recordDiag(payload.DIAG);
   }
-  if (payload.REQUEST === REQUEST_BIKES) {
-    refreshBikes();
+  if (payload.REQUEST === REQUEST_BIKES || payload.REQUEST === REQUEST_POSITION) {
+    // The nearby board follows the phone's position every minute.
+    if (isNearby(savedSettings())) pokePosition();
+    if (payload.REQUEST === REQUEST_BIKES) refreshBikes();
   } else if (payload.REQUEST || !payload.DIAG) {
     refresh();
   }

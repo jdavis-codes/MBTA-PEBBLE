@@ -62,7 +62,11 @@ Both screens use demo data so that every marker appears at once.
   ordinary board says `TO`, or `NO FIX` when the phone can't give a position.
   The radius is set in the watchface settings, from 100 to 1000 meters. Your
   phone's position is sent to the MBTA to find the stops; the phone is asked
-  for it at most every five minutes, and only while this layout is chosen.
+  for it every minute, and only while this layout is chosen. The slashes cut
+  into the column bar show how fresh the position is: four slashes when the
+  phone has just answered, and one disappears every 15 seconds. If you have
+  moved more than 150 meters, the list is fetched again straight away. An
+  empty gap means the phone has not answered for a minute.
   Departure warnings and service alerts don't apply to this layout.
 
 Both departure boards start each destination with a badge for its line,

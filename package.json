@@ -1,7 +1,7 @@
 {
   "name": "watchface",
   "author": "MakeAwesomeHappen",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "keywords": [
     "pebble-app"
   ],
@@ -51,7 +51,8 @@
       "NEAR",
       "RADIUS",
       "BOARD_ROWS",
-      "BOARD_SHOW"
+      "BOARD_SHOW",
+      "NEAR_AGE"
     ],
     "resources": {
       "media": []
