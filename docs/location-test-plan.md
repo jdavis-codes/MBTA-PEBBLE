@@ -4,9 +4,8 @@ For version 0.5.0. The plan covers five commuting days: a commuter rail trip
 in the morning and a Red Line trip in the evening. It collects the numbers that
 `docs/location-logging-spec.md` asks for (questions Q1 to Q6 there).
 
-No station is named here, and none should be added. The summary you copy out
-each day holds no positions and no stop names. The trace does show which
-stations you visited: keep it in a private note.
+No station is named here, and none should be added. The log itself holds
+your real positions and goes to a private repository, never to this one.
 
 ## What this week can and cannot answer
 
@@ -16,8 +15,8 @@ stations you visited: keep it in a private note.
 | Q2 Does the phone report speed and heading? | Yes, every day. |
 | Q3 How often is a request unanswered, and for how long? | Yes. Days 2 and 4 are the honest figure, because the phone is never touched. |
 | Q4 Watch battery cost of asking more often | No. The watch still asks once a minute. The battery notes below give the baseline to compare with later. |
-| Q5 How long until the board lists the station you arrived at | Partly: by eye on day 5, and later from the traces. |
-| Q6 Which option would have shown the right departures soonest | Not yet. It needs the replay script, which is written against the traces this week produces. |
+| Q5 How long until the board lists the station you arrived at | Partly: by eye on day 5, and later from the records. |
+| Q6 Which option would have shown the right departures soonest | Not yet. It needs the replay script, which is written against the records this week produces. |
 
 ## Why the days differ
 
@@ -33,28 +32,32 @@ and quicker positions than one in the background. So the days alternate:
 If the two kinds of day give the same figures, markers are harmless and the
 marker days can be trusted as they are. If they differ, that is a finding too.
 
-## Before the first day (10 minutes, at home)
+## Before the first day (15 minutes, at home)
 
-1. Install version 0.5.0 and open the watchface settings in the Pebble app.
-2. Set **Layout** to "Departure board: nearby" and leave **Nearby radius** at
+1. On GitHub, make a new private repository for the data, with a README so
+   that it has a first commit. Then make a fine-grained personal access token
+   limited to that repository, with "Contents: read and write".
+2. Install version 0.5.0 and open the watchface settings in the Pebble app.
+3. Set **Layout** to "Departure board: nearby" and leave **Nearby radius** at
    400 meters. Keep both the same all week so the days can be compared.
-3. At the bottom, under **Location log**, turn on "Record location requests"
-   and save. The log now runs for seven days and then turns itself off.
-   Turning it off and on again starts a new log and removes the old one, so
-   leave the switch alone until the week is over.
-4. Wait five minutes and open the settings again. "Mark where you are" is now
-   at the top. Press "Back at street level", then Save.
-5. Open the settings again and check, under **Location log**:
+4. At the bottom, under **Location log**, turn on "Record location requests",
+   enter the repository as `owner/name` and paste the token, then save. The
+   log now runs for seven days and then turns itself off. Turning it off and
+   on again starts a new log and removes the old one from the phone (not from
+   the repository), so leave the switch alone until the week is over.
+5. Wait fifteen minutes and open the settings again. "Mark where you are" is
+   now at the top. Press "Back at street level", then Save.
+6. Open the settings again and check, under **Location log**:
    - the number of records held has gone up by about one a minute;
-   - the summary box has text, and **Copy** puts it on the clipboard (paste it
-     into a note to see). If the button says it could not copy, select the
-     text in the box by hand.
-6. Set **Show the trace** to "Last 3 hours", save, and open the settings once
-   more. A trace box appears at the bottom, once. Copy it into a private note.
+   - a line says how many were uploaded and when. If it says the last upload
+     failed, the reason is beside it;
+   - the repository has a `loclog` folder with CSV files in it.
+7. Try the fallback once: the summary box has a **Copy** button, and setting
+   **Show the trace** to "Last 3 hours", saving and opening the settings again
+   shows the same CSV in a box to copy.
 
-Tell me how steps 5 and 6 went. They answer three of the spec's open
-questions (how much the phone will store, whether copying works, whether the
-page opens with a trace in it) before any commuting day depends on them.
+Tell me how steps 6 and 7 went. Uploading has only been tested against a
+stand-in for GitHub, never from an iPhone.
 
 ## Every day
 
@@ -66,18 +69,15 @@ Morning, before leaving:
 Evening, after the trip home:
 
 1. Note the two battery percents again, with the time.
-2. Open the settings, go to **Location log**, copy the **summary** into a note
-   headed with the day number. This is the part to send me.
-3. Set **Show the trace** to "Last 24 hours", save, open the settings again,
-   and copy the **trace** into a private note headed the same way. If the page
-   does not open with the trace in it, open the settings again (the trace is
-   only put in the page once) and use "Last 3 hours" instead, once after each
-   trip.
-4. Write one line about anything odd: the board saying NO FIX, departures for
+2. Open the settings and look at the upload line under **Location log**. If
+   records are waiting, saving the page sends them.
+3. Write one line about anything odd: the board saying NO FIX, departures for
    a station you had already left, the watch losing the phone.
 
-The log holds about two days of records. Missing one evening loses nothing;
-missing two in a row loses the oldest trip.
+If uploading does not work on the phone, copy the trace out each evening
+instead ("Last 24 hours"). The phone holds about two days of records, so
+missing one evening loses nothing and missing two in a row loses the oldest
+trip.
 
 ## The markers
 
@@ -105,9 +105,9 @@ time in your note instead.
 ## Day by day
 
 **Day 1: marker day.** Both trips with markers, phone otherwise in your
-pocket. The aim is to get the routine right. In the evening do the full export
-and send me the summary, so a problem shows up after one day and not after
-five.
+pocket. The aim is to get the routine right. In the evening tell me it is
+done, so I can read the day's files and a problem shows up after one day and
+not after five.
 
 **Day 2: pocket day.** Do not open the Pebble app from leaving home until you
 are at your desk, or from leaving work until you are home. Look at the watch
@@ -126,16 +126,26 @@ platform or through the gates, and when the board first listed departures
 from that station. The difference is what "look ahead" would have to beat.
 
 **Days 6 and 7:** nothing to do. Leave the log on; it turns itself off seven
-days after you switched it on and keeps what it holds. Do one last export
-after it has stopped.
+days after you switched it on. Save the settings once after it has stopped,
+so the last records are uploaded.
 
-## Sending the results
+## Reading the results
 
-Send the five summaries, the battery notes and the odd-things lines. Keep the
-traces; I will ask for them when the report and replay scripts exist, and you
-decide then whether to share them or run the scripts yourself.
+The records arrive in the data repository by themselves. Add that repository
+to the Claude session and send the battery notes, the pocket-day times and
+the odd-things lines. To look yourself:
 
-From the summaries we decide, per the spec:
+```python
+import sys; sys.path.insert(0, 'scripts')
+from loclog import load, summary
+df, marks = load('path/to/data-repo/loclog')
+summary(df[df.state == 'On a train'])
+```
+
+`scripts/loclog.py path/to/data-repo/loclog` prints the same figures as a
+table, overall and for each marker state.
+
+From them we decide, per the spec:
 
 - station lock and riding mode stay alive only if accuracy in stations and on
   trains is good enough (tens of meters, not hundreds);

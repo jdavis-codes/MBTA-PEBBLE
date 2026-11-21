@@ -1,19 +1,29 @@
 # Location logging toolkit: spec
 
 Status: step 1 of "Order of work" is built in version 0.5.0 (`src/pkjs/loclog.js`),
-with the trace export from step 3 so that the first commuting days are kept in
-full. The test plan is in `docs/location-test-plan.md`. Written at version 0.4.14.
+with the trace export from step 3. The test plan is in
+`docs/location-test-plan.md`. Written at version 0.4.14.
 
 Where 0.5.0 differs from the text below:
 
+- **The privacy rules were relaxed by the owner** (November 2026): this is a
+  development tool that only ever holds the owner's own data, and it has to be
+  easy to analyze. Records hold the real latitude, longitude and time. The
+  rule that survives is that nothing from the log goes into `pebble logs`,
+  the repo, tests or docs.
+- **The log can upload itself.** With a GitHub repository and a token entered
+  in the settings, new records are added to that repository as small CSV files
+  under `loclog/`, about every ten minutes and whenever the settings are saved.
+  Use a private repository. Copying from the settings page still works.
+- The log is CSV, one row per request and one per marker, with the columns
+  `t,time,took_ms,result,lat,lon,acc,alt,age,speed,heading,stops,refetch,stop,stop_dist,session,mark`.
+  `scripts/loclog.py` loads it into pandas.
 - While the log is on, the marker buttons are at the top of the settings page,
-  not in the section at the bottom, because they are pressed on a platform.
-- The random origin lives only in memory, so every restart of the phone side
-  starts a new one. Each record carries a segment number (`seg`); positions
-  can only be compared inside one segment.
-- The trace is shown once: choose how much under "Show the trace", save, and
-  open the settings again. The page carries the trace in its address, and how
-  long an address the Pebble iPhone app accepts is not known.
+  because they are pressed on a platform.
+- The trace is shown in the settings page once: choose how much under "Show
+  the trace", save, and open the settings again. The page carries the trace in
+  its address, and how long an address the Pebble iPhone app accepts is not
+  known.
 - `stop` is the MBTA's stop number, not its name, and it and `stops` are only
   filled on the nearby board.
 - A marker describes where the owner is for at most two hours ("Back at street
