@@ -1205,6 +1205,48 @@ static void prv_draw_classic(GContext *ctx, GRect bounds, int64_t now_ms) {
 #define BADGE_RAIL '='
 #define BADGE_H 15
 
+// The letters in the round badges are drawn from these 7 by 9 pixel shapes, so
+// they sit exactly in the middle of the disc: the system font's letters carry
+// uneven side spacing. Each row is seven bits, leftmost pixel first.
+#define BADGE_GLYPH_W 7
+#define BADGE_GLYPH_H 9
+typedef struct {
+  char letter;
+  uint8_t rows[BADGE_GLYPH_H];
+} BadgeGlyph;
+
+static const BadgeGlyph s_badge_glyphs[] = {
+  { 'R', { 0x7e, 0x63, 0x63, 0x63, 0x7e, 0x6c, 0x66, 0x63, 0x63 } },
+  { 'O', { 0x1c, 0x36, 0x63, 0x63, 0x63, 0x63, 0x63, 0x36, 0x1c } },
+  { 'B', { 0x7e, 0x63, 0x63, 0x63, 0x7e, 0x63, 0x63, 0x63, 0x7e } },
+  { 'C', { 0x3e, 0x63, 0x60, 0x60, 0x60, 0x60, 0x60, 0x63, 0x3e } },
+  { 'D', { 0x7c, 0x66, 0x63, 0x63, 0x63, 0x63, 0x63, 0x66, 0x7c } },
+  { 'E', { 0x7f, 0x60, 0x60, 0x60, 0x7e, 0x60, 0x60, 0x60, 0x7f } },
+  { 'M', { 0x63, 0x77, 0x7f, 0x6b, 0x63, 0x63, 0x63, 0x63, 0x63 } },
+};
+
+// Draws a badge letter centred in the disc whose top left is (x, y). Returns
+// false for a letter it has no shape for.
+static bool prv_draw_badge_letter(GContext *ctx, char letter, int x, int y, GColor color) {
+  for (unsigned g = 0; g < ARRAY_LENGTH(s_badge_glyphs); g++) {
+    if (s_badge_glyphs[g].letter != letter) {
+      continue;
+    }
+    graphics_context_set_stroke_color(ctx, color);
+    int left = x + (BADGE_H - BADGE_GLYPH_W) / 2;
+    int top = y + (BADGE_H - BADGE_GLYPH_H) / 2;
+    for (int row = 0; row < BADGE_GLYPH_H; row++) {
+      for (int col = 0; col < BADGE_GLYPH_W; col++) {
+        if (s_badge_glyphs[g].rows[row] & (0x40 >> col)) {
+          graphics_draw_pixel(ctx, GPoint(left + col, top + row));
+        }
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 // Draws the line badge that starts a destination, at (x, y), and returns its
 // width; *name is moved past it. Returns 0 when the destination has no badge.
 // A filled disc is the Red, Orange or Blue Line; a ring is a Green Line
@@ -1254,6 +1296,9 @@ static int prv_draw_badge(GContext *ctx, const char **name, int x, int y, GColor
   } else {
     graphics_fill_rect(ctx, box, 0, GCornerNone);
     graphics_draw_rect(ctx, box);
+  }
+  if (round && prv_draw_badge_letter(ctx, code[0], x, y, solid ? bg : fg)) {
+    return w;
   }
   graphics_context_set_text_color(ctx, solid ? bg : fg);
   prv_draw_text(ctx, code, s_header_font, GRect(x - 4, y - 3, w + 9, 18), GTextAlignmentCenter);
