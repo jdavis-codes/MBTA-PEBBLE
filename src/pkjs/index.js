@@ -267,7 +267,17 @@ function finishLocation(id, err, pos) {
   });
   // The location log, when it is switched on in the settings.
   loclog.record(started, pos ? null : err, pos, pos ? stopsAround(pos) : null, s_positionRefetched);
-  loclog.upload(savedSettings(), false);
+  var saved = savedSettings();
+  loclog.upload(saved, false);
+  // The nearby board keeps the list of stops around the phone up to date for
+  // itself. On the other layouts the log does, so its records name the
+  // nearest stop there too.
+  if (pos && loclog.isOn() && !isNearby(saved)) {
+    try {
+      nearbyStops({ lat: pos.coords.latitude, lon: pos.coords.longitude }, nearbyRadius(saved),
+                  function() {});
+    } catch (e) { /* only for the log */ }
+  }
 }
 
 // Asks the phone where it is; callback(err, pos) is optional.
@@ -958,7 +968,7 @@ function nearbyStops(pos, radius, callback) {
 }
 
 // For the location log: how many stops the nearby board last listed, and
-// which of them is closest to this position. Empty on the other layouts.
+// which of them is closest to this position.
 function stopsAround(pos) {
   var c = s_nearStops;
   if (!c) return null;

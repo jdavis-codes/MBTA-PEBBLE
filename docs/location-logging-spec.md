@@ -24,8 +24,10 @@ Where 0.5.0 differs from the text below:
   the trace", save, and open the settings again. The page carries the trace in
   its address, and how long an address the Pebble iPhone app accepts is not
   known.
-- `stop` is the MBTA's stop number, not its name, and it and `stops` are only
-  filled on the nearby board.
+- `stop` is the MBTA's stop number, not its name. While the log is on, the
+  stops around the phone are looked up on every layout, not only the nearby
+  board, so `stop`, `stop_dist` and `stops` are always filled. They describe
+  the last lookup, which is repeated once the phone has moved 150 meters.
 - A marker describes where the owner is for at most two hours ("Back at street
   level" for 20 minutes), so a forgotten marker does not count a day at a desk.
 - While the log is on, the phone is asked for its position every time the

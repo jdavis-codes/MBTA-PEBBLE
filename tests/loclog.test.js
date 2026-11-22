@@ -119,10 +119,10 @@ assert.ok(!/Mark where you are/.test(opened.pop()));
 
 // Uploads: a new CSV file in the repository once ten records wait, and at
 // once when the settings are saved. A failure is tried again with the next.
-var puts = [], answerWith = 201;
+var puts = [], gets = [], answerWith = 201;
 global.XMLHttpRequest = function() {
   var x = this; x.headers = {};
-  x.open = function(method, url) { x.method = method; x.url = url; };
+  x.open = function(method, url) { x.method = method; x.url = url; if (method === 'GET') gets.push(url); };
   x.setRequestHeader = function(k, v) { x.headers[k] = v; };
   x.send = function(body) { if (x.method !== 'PUT') return; x.body = JSON.parse(body); x.status = answerWith; puts.push(x); if (answerWith) x.onload(); };
 };
@@ -159,6 +159,17 @@ assert.strictEqual(puts.length, 4);
 answerWith = 201; skew += 60000; answer(0, 0);
 assert.strictEqual(puts.length, 5);
 assert.strictEqual(text(puts[4]).trim().split('\n').length, 1 + 11);
+// On a layout other than the nearby board, the log looks up the stops around
+// the phone itself, with the radius from the settings.
+gets.length = 0;
+save(Object.assign({}, cfg, { LAYOUT: '0', RADIUS: '300' }));
+answer(0, 0);   // answers the request that saving the settings started
+var lookups = gets.filter(u => /\/stops\?/.test(u));
+assert.strictEqual(lookups.length, 1, gets.join(' '));
+assert.ok(/latitude%5D=42\.35639|latitude\]=42\.35639/.test(lookups[0]), 'the lookup is around the phone');
+save({ LAYOUT: '0', LOG_ON: false });
+gets.length = 0; answer(0, 0);
+assert.strictEqual(gets.filter(u => /\/stops\?/.test(u)).length, 0, 'not when the log is off');
 // The token and the repository stay on the phone.
 assert.ok(sent.every(d => !('LOG_REPO' in d) && !('LOG_TOKEN' in d)));
 console.log('location log OK');
