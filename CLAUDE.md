@@ -49,10 +49,11 @@ The `--vnc` flag enables a VNC-based display backend that doesn't require X11.
 ```
 src/c/watchface.c       - the whole watch side: one canvas layer, four layouts
 src/pkjs/index.js       - phone side: MBTA and Bluebikes requests, location, messages to the watch
+src/pkjs/loclog.js      - the location log: a record of every location request, kept on the phone
 src/pkjs/config.js      - the settings page definition (Clay)
 src/pkjs/config-page.js - script that runs inside the settings page (live lists, show and hide)
 tests/                  - phone-side tests (`make test`)
-scripts/                - setup, log capture, emulator helpers
+scripts/                - setup, log capture, emulator helpers, `loclog.py` (the location log in pandas)
 docs/                   - guide and banner sources (HTML) and their rendered images
 ```
 

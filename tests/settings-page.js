@@ -11,7 +11,10 @@ Module._load = function(req, ...r) { return req === 'message_keys' ? mk : origLo
 const Clay = require(path.join(root, 'node_modules/@rebble/clay/dist/js/index.js'));
 const config = require(path.join(root, 'src/pkjs/config.js'));
 const page = require(path.join(root, 'src/pkjs/config-page.js'));
-const clay = new Clay(config.build({}, ['usage'], ['location']), page, { autoHandleEvents: false });
+// A location log that is on, with a summary and a trace to show.
+const log = { on: true, status: ['2 records held.'], summary: ['Summary line 1', 'Requests: 2 made, 2 answered.'],
+              trace: ['t,time,took_ms,result', '1795436045.0,2026-11-23 08:14:05,300,ok,42.356390,-71.062420,10,,2,1.2,0,3,0,place-pktrm,40,1,', '1795436105.0,2026-11-23 08:15:05,,mark,,,,,,,,,,,,,Boarded'] };
+const clay = new Clay(config.build({}, ['usage'], ['location'], log), page, { autoHandleEvents: false });
 (async () => {
   const { chromium } = require('playwright');
   const browser = await chromium.launch();
@@ -35,6 +38,18 @@ const clay = new Clay(config.build({}, ['usage'], ['location']), page, { autoHan
     }
     if (out) await pg.screenshot({ path: out + v + '.png' });
   }
+  // The location log: the boxes hold their text, and markers wait in the hidden field.
+  assert.strictEqual(await pg.locator('#log-summary textarea, textarea').first().inputValue(), log.summary.join('\n'));
+  assert.strictEqual(await pg.locator('textarea').nth(1).inputValue(), log.trace.join('\n'));
+  const before = Date.now();
+  await pg.getByRole('button', { name: 'Boarded' }).click();
+  await pg.getByRole('button', { name: 'Got off' }).click();
+  const marks = await pg.evaluate(() => Array.from(document.querySelectorAll('input')).map(i => i.value).find(v => /@/.test(v)));
+  const m = /^3@(\d+),4@(\d+)$/.exec(marks);
+  assert.ok(m && +m[1] >= before && +m[2] >= +m[1], 'markers: ' + marks);
+  assert.ok(/Marked: Boarded at [\d:]+, Got off at [\d:]+\. Save to keep them\./.test(await pg.locator('body').innerText()));
+  assert.strictEqual(await pg.getByText('Markers', { exact: true }).isVisible(), false);
+  if (out) await pg.screenshot({ path: out + 'log.png', fullPage: true });
   assert.deepStrictEqual(errors, []);
   console.log('settings page OK');
   await browser.close(); process.exit(0);

@@ -1,6 +1,7 @@
 var Clay = require('@rebble/clay');
 var config = require('./config');
 var configPage = require('./config-page');
+var loclog = require('./loclog');
 var keys = require('message_keys');
 
 // Settings are sent manually so a save that collides with a data update is retried.
@@ -234,6 +235,8 @@ var LOCATION_HUNG_MS = 20 * 1000;
 var s_locating = 0;       // when the request in flight was made, or 0
 var s_locationId = 0;
 var s_locationWaiters = [];
+// Set by a waiter when the position it was given made the departures load again.
+var s_positionRefetched = false;
 
 function finishLocation(id, err, pos) {
   if (id !== s_locationId || !s_locating) return;
@@ -258,9 +261,13 @@ function finishLocation(id, err, pos) {
   saveLocationTest(r);
   var waiters = s_locationWaiters;
   s_locationWaiters = [];
+  s_positionRefetched = false;
   waiters.forEach(function(w) {
     try { w(pos ? null : new Error(err), pos); } catch (e) { console.log('Location waiter: ' + e); }
   });
+  // The location log, when it is switched on in the settings.
+  loclog.record(started, pos ? null : err, pos, pos ? stopsAround(pos) : null, s_positionRefetched);
+  loclog.upload(savedSettings(), false);
 }
 
 // Asks the phone where it is; callback(err, pos) is optional.
@@ -856,7 +863,7 @@ var NEARBY_POSITION_MS = 45 * 1000;
 var NEARBY_MOVE_M = 150;
 var METERS_PER_DEGREE = 111000;
 var s_position = null;   // { t, lat, lon }
-var s_nearStops = null;  // { lat, lon, radius, stops: { id: meters away } }
+var s_nearStops = null;  // { lat, lon, radius, stops: { id: meters away }, at: { id: [lat, lon] } }
 
 function isNearby(saved) {
   return parseInt(saved.LAYOUT, 10) === LAYOUT_NEARBY;
@@ -890,6 +897,7 @@ function keepPosition(err, pos) {
   sendToWatch(age, 0, 'position age');
   var c = s_nearStops;
   if (c && metersBetween(c.lat, c.lon, s_position.lat, s_position.lon) >= NEARBY_MOVE_M) {
+    s_positionRefetched = true;
     // A fetch already under way is using the old position: run another after it.
     if (s_fetching) s_refetch = true;
     else refresh();
@@ -935,14 +943,35 @@ function nearbyStops(pos, radius, callback) {
   }, function(err, json) {
     if (err) return callback(err);
     var stops = {};
+    var at = {};
     json.data.forEach(function(stop) {
       var a = stop.attributes;
       var m = metersBetween(pos.lat, pos.lon, a.latitude, a.longitude);
-      if (m <= radius) stops[stop.id] = m;
+      if (m <= radius) {
+        stops[stop.id] = m;
+        at[stop.id] = [a.latitude, a.longitude];
+      }
     });
-    s_nearStops = { lat: pos.lat, lon: pos.lon, radius: radius, stops: stops };
+    s_nearStops = { lat: pos.lat, lon: pos.lon, radius: radius, stops: stops, at: at };
     callback(null, stops);
   });
+}
+
+// For the location log: how many stops the nearby board last listed, and
+// which of them is closest to this position. Empty on the other layouts.
+function stopsAround(pos) {
+  var c = s_nearStops;
+  if (!c) return null;
+  var out = { stops: 0 };
+  Object.keys(c.at).forEach(function(id) {
+    var m = metersBetween(pos.coords.latitude, pos.coords.longitude, c.at[id][0], c.at[id][1]);
+    out.stops++;
+    if (!out.stop || m < out.stopDist) {
+      out.stop = id;
+      out.stopDist = m;
+    }
+  });
+  return out;
 }
 
 function nearbyName(routeId, route, headsign) {
@@ -1210,8 +1239,24 @@ function refresh() {
 
 Pebble.addEventListener('showConfiguration', function() {
   // Rebuilt each time so the page includes the saved stations as fallback options.
-  clay = new Clay(config.build(savedSettings(), usageLines(), locationLines()), configPage,
-                  { autoHandleEvents: false });
+  var saved = savedSettings();
+  // The switch follows the log, which turns itself off after seven days.
+  var logOn = loclog.isOn();
+  var traceHours = parseInt(saved.LOG_TRACE, 10);
+  // The trace is put in the page once and has to be asked for again: it
+  // makes the page large, and a page too large to open must not stay that way.
+  if (!!saved.LOG_ON !== logOn || saved.LOG_TRACE !== '-1' || saved.LOG_MARKS) {
+    saved.LOG_ON = logOn;
+    saved.LOG_TRACE = '-1';
+    saved.LOG_MARKS = '';
+    storeSettings(JSON.stringify(saved));
+  }
+  clay = new Clay(config.build(saved, usageLines(), locationLines(), {
+    on: logOn,
+    status: loclog.statusLines(),
+    summary: loclog.summaryLines(),
+    trace: traceHours >= 0 ? loclog.traceLines(traceHours) : null
+  }), configPage, { autoHandleEvents: false });
   Pebble.openURL(clay.generateUrl());
 });
 
@@ -1221,6 +1266,17 @@ Pebble.addEventListener('webviewclosed', function(e) {
   var settings = clay.getSettings(e.response);
   storeSettings(localStorage.getItem('clay-settings'));
   var after = savedSettings();
+  // The location log's settings are for the phone only.
+  if (after.LOG_ON && !loclog.isOn()) loclog.start();
+  else if (!after.LOG_ON) loclog.stop();
+  loclog.addMarks(after.LOG_MARKS);
+  // Saving sends what is waiting, so a marker reaches the repository at once.
+  loclog.upload(after, true);
+  delete settings[keys.LOG_ON];
+  delete settings[keys.LOG_MARKS];
+  delete settings[keys.LOG_TRACE];
+  delete settings[keys.LOG_REPO];
+  delete settings[keys.LOG_TOKEN];
   // Rows now pointing somewhere else are blanked until their new data arrives,
   // so the old line's times and branch letters never linger.
   var cleared = {};
@@ -1291,8 +1347,10 @@ Pebble.addEventListener('appmessage', function(e) {
     recordDiag(payload.DIAG);
   }
   if (payload.REQUEST === REQUEST_BIKES || payload.REQUEST === REQUEST_POSITION) {
-    // The nearby board follows the phone's position every minute.
+    // The nearby board follows the phone's position every minute. So does
+    // the location log, on any layout, whenever the watch asks for something.
     if (isNearby(savedSettings())) pokePosition();
+    else if (loclog.isOn()) testLocation();
     if (payload.REQUEST === REQUEST_BIKES) refreshBikes();
   } else if (payload.REQUEST || !payload.DIAG) {
     refresh();
@@ -1306,7 +1364,7 @@ if (typeof module !== 'undefined') {
     alertText: alertText, alertApplies: alertApplies, bikeLetter: bikeLetter,
     tagBusDestinations: tagBusDestinations, noteUsage: noteUsage, usageLines: usageLines,
     testLocation: testLocation, locationLines: locationLines, nearbyName: nearbyName, badgedName: badgedName,
-    metersBetween: metersBetween,
+    metersBetween: metersBetween, loclog: loclog,
     shortDest: shortDest
   };
 }

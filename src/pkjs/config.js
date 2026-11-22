@@ -163,15 +163,129 @@ function bikeSection(saved) {
   return { type: 'section', items: items };
 }
 
+// Must match MARKS in loclog.js.
+var MARKERS = ['Entered station', 'On platform', 'Boarded', 'Got off', 'Back at street level'];
+
+// The whole page travels in its address, where most punctuation takes several
+// characters. The two that a trace is full of get one each; unpackLines in
+// config-page.js undoes it.
+function packLines(lines) {
+  return encodeURIComponent(lines.join('\n')).replace(/!/g, '%21').replace(/~/g, '%7E')
+    .replace(/%2C/g, '!').replace(/%0A/g, '~');
+}
+
+// A box of text to select and copy, with a button that tries to copy it.
+// The text is put in the box by config-page.js.
+function copyBox(id, lines, rows) {
+  return [
+    {
+      type: 'text',
+      id: id,
+      defaultValue: '<textarea readonly rows="' + rows + '" style="width:100%;box-sizing:border-box;' +
+                    'font:12px monospace;color:#000;background:#fff" data-lines="' +
+                    packLines(lines) + '"></textarea>'
+    },
+    { type: 'button', id: id + '-copy', defaultValue: 'Copy' }
+  ];
+}
+
+// While the log is on, the markers are at the top of the page: they are
+// pressed standing on a platform.
+function markerSection(log) {
+  if (!log.on) return [];
+  return [{
+    type: 'section',
+    items: [
+      { type: 'heading', defaultValue: 'Mark where you are' },
+      {
+        type: 'text',
+        id: 'mark-status',
+        defaultValue: 'Press a button when it happens, then Save. The time of the ' +
+                      'press is what is kept, so you can press several before saving.'
+      }
+    ].concat(MARKERS.map(function(name, i) {
+      return { type: 'button', id: 'mark-' + (i + 1), defaultValue: name };
+    })).concat([
+      { type: 'input', messageKey: 'LOG_MARKS', id: 'log-marks', label: 'Markers', defaultValue: '' },
+      { type: 'button', id: 'mark-save', primary: true, defaultValue: 'Save' }
+    ])
+  }];
+}
+
+function logSection(location, log) {
+  var items = [
+    { type: 'heading', defaultValue: 'Location log' },
+    {
+      type: 'toggle',
+      messageKey: 'LOG_ON',
+      label: 'Record location requests',
+      description: 'A development tool. Keeps a record of every time the watchface asks ' +
+                   'your phone where it is: the position, how long the answer took and how ' +
+                   'accurate it was. It turns itself off after seven days. Turning it on ' +
+                   'starts a new log and removes the old one from the phone.',
+      defaultValue: false
+    },
+    { type: 'text', defaultValue: log.status.join('<br>') + '<br>Today: ' + location.join('<br>') },
+    {
+      type: 'input',
+      messageKey: 'LOG_REPO',
+      label: 'Upload to GitHub repository',
+      description: 'For example yourname/mbta-pebble-data. New records are added to it as ' +
+                   'small CSV files in a loclog folder, about every ten minutes and whenever ' +
+                   'you save this page. The records hold your positions, so use a private ' +
+                   'repository. Leave empty to keep the log on the phone only.',
+      defaultValue: '',
+      attributes: { placeholder: 'owner/repository', autocomplete: 'off', autocapitalize: 'off' }
+    },
+    {
+      type: 'input',
+      messageKey: 'LOG_TOKEN',
+      label: 'GitHub token',
+      description: 'A fine-grained personal access token that can read and write the ' +
+                   'contents of that one repository.',
+      defaultValue: '',
+      attributes: { type: 'password', placeholder: 'github_pat_...', autocomplete: 'off', autocapitalize: 'off' }
+    }
+  ];
+  if (log.summary.length > 1) {
+    items.push({ type: 'heading', size: 6, defaultValue: 'Summary' });
+    items.push({ type: 'text', defaultValue: 'Counts and spreads only: no positions and no stop numbers.' });
+    items = items.concat(copyBox('log-summary', log.summary, 12));
+    items.push({
+      type: 'select',
+      messageKey: 'LOG_TRACE',
+      label: 'Show the trace',
+      description: 'The trace is every record in full, as CSV, positions included. ' +
+                   'Choose how much, save, and open the settings again: it is shown once, below.',
+      defaultValue: '-1',
+      options: [
+        { label: 'No', value: '-1' },
+        { label: 'Last 3 hours', value: '3' },
+        { label: 'Last 12 hours', value: '12' },
+        { label: 'Last 24 hours', value: '24' },
+        { label: 'Everything held', value: '0' }
+      ]
+    });
+    if (log.trace) {
+      items.push({ type: 'heading', size: 6, defaultValue: 'Trace' });
+      items = items.concat(copyBox('log-trace', log.trace, 8));
+    }
+  }
+  return { type: 'section', items: items };
+}
+
 // saved: the flat settings Clay keeps in localStorage ('clay-settings').
 // usage: lines describing how much data has been downloaded, from index.js.
-// location: lines from the location test, also from index.js.
-function buildConfig(saved, usage, location) {
+// location: lines from today's location requests, also from index.js.
+// log: the location log, from loclog.js: { on, status, summary, trace }, each but `on` a list of lines.
+function buildConfig(saved, usage, location, log) {
   saved = saved || {};
   usage = usage || [];
   location = location || [];
+  log = log || { on: false, status: [], summary: [], trace: null };
   return [
-    { type: 'heading', defaultValue: 'MBTA Pebble' },
+    { type: 'heading', defaultValue: 'MBTA Pebble' }
+  ].concat(markerSection(log)).concat([
     {
       type: 'section',
       items: [
@@ -240,7 +354,7 @@ function buildConfig(saved, usage, location) {
     { type: 'heading', id: 'stations-heading', size: 4,
       defaultValue: 'Choose up to 3 stations or bus stops to watch' },
     { type: 'text', id: 'mbta-status', defaultValue: 'Loading MBTA lines…' }
-  ].concat(ROWS.map(function(row, i) {
+  ]).concat(ROWS.map(function(row, i) {
     return rowSection(row, i, saved);
   })).concat([
     bikeSection(saved),
@@ -254,16 +368,7 @@ function buildConfig(saved, usage, location) {
         }
       ]
     },
-    {
-      type: 'section',
-      items: [
-        { type: 'heading', defaultValue: 'Location test' },
-        {
-          type: 'text',
-          defaultValue: location.join('<br>')
-        }
-      ]
-    },
+    logSection(location, log),
     { type: 'submit', defaultValue: 'Save' }
   ]);
 }

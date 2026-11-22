@@ -1,7 +1,7 @@
 {
   "name": "mbta-pebble",
   "author": "James Davis",
-  "version": "0.4.15",
+  "version": "0.5.0",
   "keywords": [
     "pebble-app"
   ],
@@ -52,7 +52,12 @@
       "RADIUS",
       "BOARD_ROWS",
       "BOARD_SHOW",
-      "NEAR_AGE"
+      "NEAR_AGE",
+      "LOG_ON",
+      "LOG_MARKS",
+      "LOG_TRACE",
+      "LOG_REPO",
+      "LOG_TOKEN"
     ],
     "resources": {
       "media": []
@@ -64,7 +69,8 @@
           "domains": [
             "api-v3.mbta.com",
             "gbfs.lyft.com",
-            "gbfs.bluebikes.com"
+            "gbfs.bluebikes.com",
+            "api.github.com"
           ]
         }
       }

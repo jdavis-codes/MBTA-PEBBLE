@@ -498,7 +498,82 @@ module.exports = function() {
     xhr.send();
   }
 
+  // ---- Location log ----
+  // Must match MARKS in loclog.js and MARKERS in config.js.
+  var NUM_MARKERS = 5;
+
+  function clock(ms) {
+    var d = new Date(ms);
+    function p(n) { return n < 10 ? '0' + n : String(n); }
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  // Markers wait in a hidden field, as "number@time", until the page is saved.
+  function setUpMarkers() {
+    var field = clayConfig.getItemById('log-marks');
+    if (!field) return;
+    field.set('');
+    field.hide();
+    var status = clayConfig.getItemById('mark-status');
+    var said = [];
+    for (var i = 1; i <= NUM_MARKERS; i++) {
+      (function(n) {
+        var button = clayConfig.getItemById('mark-' + n);
+        if (!button) return;
+        button.on('click', function() {
+          var now = Date.now();
+          var held = field.get();
+          field.set((held ? held + ',' : '') + n + '@' + now);
+          said.push(button.$manipulatorTarget[0].textContent.trim() + ' at ' + clock(now));
+          status.set('Marked: ' + said.join(', ') + '. Save to keep ' +
+                     (said.length === 1 ? 'it.' : 'them.'));
+        });
+      })(i);
+    }
+    var save = clayConfig.getItemById('mark-save');
+    if (save) {
+      save.on('click', function() {
+        var submit = document.querySelector('button[type="submit"]');
+        if (submit) submit.click();
+      });
+    }
+  }
+
+  // A box of text and its Copy button (copyBox in config.js).
+  function setUpCopyBox(id) {
+    var item = clayConfig.getItemById(id);
+    var button = clayConfig.getItemById(id + '-copy');
+    if (!item || !button) return;
+    var box = item.$element[0].querySelector('textarea');
+    if (!box) return;
+    // unpackLines: the reverse of packLines in config.js.
+    box.value = decodeURIComponent(box.getAttribute('data-lines').replace(/!/g, '%2C').replace(/~/g, '%0A'));
+    button.on('click', function() {
+      var label = button.$manipulatorTarget[0];
+      function say(text) { label.textContent = text; }
+      box.focus();
+      box.select();
+      box.setSelectionRange(0, box.value.length);
+      var done = false;
+      try { done = document.execCommand('copy'); } catch (e) { done = false; }
+      if (done) return say('Copied');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(box.value).then(function() {
+          say('Copied');
+        }, function() {
+          say('Could not copy: select the text by hand');
+        });
+      } else {
+        say('Could not copy: select the text by hand');
+      }
+    });
+  }
+
   clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {
+    setUpMarkers();
+    setUpCopyBox('log-summary');
+    setUpCopyBox('log-trace');
+
     for (var slot = 0; slot < NUM_BIKES; slot++) {
       (function(s) {
         var search = clayConfig.getItemById('bike-search-' + s);
