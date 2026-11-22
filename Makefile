@@ -66,8 +66,8 @@ kill: ## Stop the emulator
 wipe: kill ## Stop the emulator and reset its stored data
 	@pebble wipe >/dev/null 2>&1; echo "Emulator data wiped."
 
-login: ## Sign in to your Pebble account (prints a link)
-	pebble login --no-open-browser
+login: ## Sign in to your Pebble account (prints a link; nothing to paste back)
+	@scripts/pebble-login.sh
 
 status: ## Show whether the Pebble account is signed in
 	@pebble login --status

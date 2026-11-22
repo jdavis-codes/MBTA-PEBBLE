@@ -82,20 +82,29 @@ diorite. Two limits:
 
 ## 3. Pebble account login
 
-`pebble login` expects a browser on the same machine. From a VM:
+`pebble login` expects a browser on the same machine. `make login`
+(`scripts/pebble-login.sh`) works around that:
 
-1. Run `pebble login --no-open-browser` in the background with output sent to
-   a file and `PYTHONUNBUFFERED=1`. It prints an `appstore-api.repebble.com`
-   authorize URL and then waits on `localhost:60000`.
-2. Fetch the URL's headers once yourself. A `307` to `/dashboard/signin` means
-   it is live. If the start request or the URL hangs, the sign-in service is
-   down: tell the user, retry later, do not hand over a dead link.
-3. Give the user the URL. After signing in (Google, GitHub or Apple) their
-   browser lands on `http://localhost:60000/?...` and shows a connection error.
-   That is expected. Ask them to paste that full address back.
-4. Replay it inside the container: `curl "http://localhost:60000/?<their query>"`.
-   The waiting login then completes.
-5. Confirm with `pebble login --status`. Do not print the account email.
+1. Run `make login` in the background with its output sent to a file. It
+   prints an `appstore-api.repebble.com` authorize link, then waits up to ten
+   minutes for the sign-in.
+2. Fetch the link's headers once yourself. A `307` to `/dashboard/signin` means
+   it is live. If it hangs, the sign-in service is down: tell the user, retry
+   later, do not hand over a dead link.
+3. Give the user the link. After signing in (Google, GitHub or Apple) their
+   browser lands on `http://localhost:60000/?broker_status=ok` and shows a
+   connection error. That is expected, and nothing has to be pasted back: the
+   script has already sent that address to the waiting tool.
+4. The command ends with `Signed in.` Do not print the account email.
+
+A link lasts about ten minutes. One used later fails with `Flow not found or
+expired`; run `make login` again for a new one.
+
+The script was written in November 2026 and has not yet been through a real
+sign-in. If it fails, the manual way still works within 30 seconds of the
+sign-in: run `pebble login --no-open-browser`, hand over the link, and when
+the user says they have signed in run
+`curl "http://localhost:60000/?broker_status=ok"`.
 
 ## 4. Installing on the real watch
 
